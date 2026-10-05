@@ -1,0 +1,133 @@
+# Constructor Studio canonical kit manifest for studio-kit-core (minimal cut).
+# Full version with SCREEN/VERDICT/CALIBRATION/CLAIM, checklists, workflows and gates: _later/.cf-studio-kit.full.toml
+# Resource ids double as template variables inside rules files: {plan_template}, {run_rules}, ...
+
+manifest_version = "1.0"
+
+[[kits]]
+slug = "studio-kit-core"
+name = "studio-kit-core"
+version = "0.1.0"
+
+# ── PLAN ────────────────────────────────────────────────────────
+[[kits.resources]]
+id = "plan_template"
+kind = "template"
+source = "artifacts/PLAN/template.md"
+install_path = "artifacts/PLAN/template.md"
+type = "file"
+user_modifiable = true
+description = "PLAN artifact template (question, dataset, verdict criteria, screening policy, approval)"
+
+[[kits.resources]]
+id = "plan_rules"
+kind = "other"
+source = "artifacts/PLAN/rules.md"
+install_path = "artifacts/PLAN/rules.md"
+type = "file"
+user_modifiable = true
+description = "PLAN authoring rules"
+
+# ── DATASET ─────────────────────────────────────────────────────
+[[kits.resources]]
+id = "dataset_template"
+kind = "template"
+source = "artifacts/DATASET/template.md"
+install_path = "artifacts/DATASET/template.md"
+type = "file"
+user_modifiable = true
+description = "DATASET artifact template (source, acquisition order, axes, normalisation)"
+
+[[kits.resources]]
+id = "dataset_rules"
+kind = "other"
+source = "artifacts/DATASET/rules.md"
+install_path = "artifacts/DATASET/rules.md"
+type = "file"
+user_modifiable = true
+description = "DATASET authoring rules"
+
+# ── RUN ─────────────────────────────────────────────────────────
+[[kits.resources]]
+id = "run_template"
+kind = "template"
+source = "artifacts/RUN/template.md"
+install_path = "artifacts/RUN/template.md"
+type = "file"
+user_modifiable = true
+description = "RUN artifact template (one procedure on one dataset snapshot: candidate spec, settings, licensed assumptions, outputs, own verdict)"
+
+[[kits.resources]]
+id = "run_rules"
+kind = "other"
+source = "artifacts/RUN/rules.md"
+install_path = "artifacts/RUN/rules.md"
+type = "file"
+user_modifiable = true
+description = "RUN authoring rules"
+
+# ── COMPARISON ─────────────────────────────────────────────────────
+[[kits.resources]]
+id = "comparison_template"
+kind = "template"
+source = "artifacts/COMPARISON/template.md"
+install_path = "artifacts/COMPARISON/template.md"
+type = "file"
+user_modifiable = true
+description = "COMPARISON artifact template (candidates on one snapshot: criterion vectors, pairwise dominance, selection, open pairs, hypothesis status updates)"
+
+[[kits.resources]]
+id = "comparison_rules"
+kind = "other"
+source = "artifacts/COMPARISON/rules.md"
+install_path = "artifacts/COMPARISON/rules.md"
+type = "file"
+user_modifiable = true
+description = "COMPARISON authoring rules"
+
+# ── agent quick reference (public rule: aggregated into the generated AGENTS.md)
+[[kits.resources]]
+id = "agents"
+kind = "rule"
+source = "AGENTS.md"
+install_path = "AGENTS.md"
+type = "file"
+user_modifiable = true
+public = true
+description = "Agent quick reference: the four artifact kinds, their resources, and navigation rules"
+
+# ── shared principles (loaded by every rules.md via {principles})
+[[kits.resources]]
+id = "principles"
+kind = "other"
+source = "principles.md"
+install_path = "principles.md"
+type = "file"
+user_modifiable = true
+description = "Cross-cutting invariants P1–P12 shared by PLAN, DATASET and RUN rules"
+
+# ── constraints (keep LAST: the artifact bindings below attach to this resource)
+[[kits.resources]]
+id = "constraints"
+kind = "constraints"
+source = "constraints.toml"
+install_path = "constraints.toml"
+type = "file"
+user_modifiable = true
+description = "Deterministic structural constraints for PLAN, DATASET, RUN, COMPARISON"
+
+[kits.resources.artifacts.PLAN]
+template = "plan_template"
+rules = "plan_rules"
+
+[kits.resources.artifacts.DATASET]
+template = "dataset_template"
+rules = "dataset_rules"
+
+[kits.resources.artifacts.RUN]
+template = "run_template"
+rules = "run_rules"
+
+[kits.resources.artifacts.COMPARISON]
+template = "comparison_template"
+rules = "comparison_rules"

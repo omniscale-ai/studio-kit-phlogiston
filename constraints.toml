@@ -1,0 +1,479 @@
+# Deterministic structural constraints for PLAN, DATASET, RUN, COMPARISON.
+# Heading `pattern` must match the heading text in artifacts/<KIND>/template.md (without the number).
+# `## Table of Contents` is not listed here: `cfs validate` checks it through the TOC validator, as in the SDLC kit.
+# `references.<KIND>` without a `coverage` key = optional; `coverage = true` requires the citation, `coverage = false` prohibits it.
+# A rule is declared only where the citing kind's template carries the ID placeholder, so `validate-kits` stays warning-free.
+
+# ── PLAN ────────────────────────────────────────────────────────
+
+[[artifacts.PLAN.headings]]
+id = "plan-h1-title"
+level = 1
+required = true
+multiple = false
+numbered = false
+description = "PLAN document title (H1)."
+
+[[artifacts.PLAN.headings]]
+id = "plan-research-question"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Research Question"
+description = "Research Question section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-prior-knowledge"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Prior Knowledge"
+description = "Prior Knowledge section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-datasets"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Datasets"
+description = "Datasets section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-simulation-cost"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Simulation Cost"
+description = "Simulation Cost section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-budget"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Budget"
+description = "Budget section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-phase-sequence"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Phase Sequence"
+description = "Phase Sequence section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-experiment-design-policy"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Experiment Design Policy"
+description = "Experiment Design Policy section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-hypothesis-space"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Hypothesis Space"
+description = "Hypothesis Space section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-hypothesis"
+level = 3
+required = true
+multiple = true
+numbered = false
+description = "One hypothesis block, defined by its **ID** line."
+
+[[artifacts.PLAN.headings]]
+id = "plan-verdict-criteria"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Verdict Criteria"
+description = "Verdict Criteria section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-criterion"
+level = 3
+required = true
+multiple = true
+numbered = false
+description = "One verdict criterion block, defined by its **ID** line."
+
+[[artifacts.PLAN.headings]]
+id = "plan-stop-conditions"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Stop Conditions"
+description = "Stop Conditions section."
+
+[[artifacts.PLAN.headings]]
+id = "plan-approval"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Approval"
+description = "Approval section."
+
+[artifacts.PLAN.identifiers.plan]
+name = "PLAN"
+description = "One agent run: question, datasets and origin, simulation cost, budget, phases, design policy, hypotheses register, verdict criteria, approval."
+required = true
+task = false
+priority = false
+to_code = false
+template = "cpt-{system}-plan-{slug}"
+headings = ["plan-h1-title"]
+
+[artifacts.PLAN.identifiers.criterion]
+name = "Verdict criterion"
+description = "One declared verdict criterion; every RUN verdict row references one of these."
+required = true
+task = false
+priority = false
+to_code = false
+template = "cpt-{system}-criterion-{slug}"
+headings = ["plan-criterion"]
+
+[artifacts.PLAN.identifiers.hypothesis]
+name = "Hypothesis"
+description = "One block of the hypothesis register; referenced by DATASET justifications, RUN handoffs and COMPARISON status updates."
+required = true
+task = false
+priority = false
+to_code = false
+template = "cpt-{system}-hypothesis-{slug}"
+headings = ["plan-hypothesis"]
+
+[artifacts.PLAN.identifiers.hypothesis.references.COMPARISON]
+# optional (no coverage key): cited from this kind when it exists
+
+
+# ── DATASET ─────────────────────────────────────────────────────
+
+[[artifacts.DATASET.headings]]
+id = "dataset-h1-title"
+level = 1
+required = true
+multiple = false
+numbered = false
+description = "DATASET document title (H1)."
+
+[[artifacts.DATASET.headings]]
+id = "dataset-origin-and-source"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Origin and Source"
+description = "Origin and Source section."
+
+[[artifacts.DATASET.headings]]
+id = "dataset-apparatus"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Apparatus"
+description = "Apparatus section."
+
+[[artifacts.DATASET.headings]]
+id = "dataset-units-of-analysis"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Units of Analysis"
+description = "Units of Analysis section."
+
+[[artifacts.DATASET.headings]]
+id = "dataset-units-of-measure"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Units of Measure"
+description = "Units of Measure section."
+
+[[artifacts.DATASET.headings]]
+id = "dataset-axes"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Axes"
+description = "Axes section."
+
+[[artifacts.DATASET.headings]]
+id = "dataset-acquisition"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Acquisition"
+description = "Acquisition section."
+
+[[artifacts.DATASET.headings]]
+id = "dataset-normalisation"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Normalisation"
+description = "Normalisation section."
+
+[[artifacts.DATASET.headings]]
+id = "dataset-known-defects"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Known Defects"
+description = "Known Defects section."
+
+[[artifacts.DATASET.headings]]
+id = "dataset-provenance"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Provenance"
+description = "Provenance section."
+
+[artifacts.DATASET.identifiers.dataset]
+name = "DATASET"
+description = "Every experiment acquired in one run: origin, apparatus, units of measure, allowed and explored axes, justified batches in order, defects, provenance."
+required = true
+task = false
+priority = false
+to_code = false
+template = "cpt-{system}-dataset-{slug}"
+headings = ["dataset-h1-title"]
+
+[artifacts.DATASET.identifiers.dataset.references.PLAN]
+# optional (no coverage key): cited from this kind when it exists
+
+
+# ── RUN ─────────────────────────────────────────────────────────
+
+[[artifacts.RUN.headings]]
+id = "run-h1-title"
+level = 1
+required = true
+multiple = false
+numbered = false
+description = "RUN document title (H1)."
+
+[[artifacts.RUN.headings]]
+id = "run-unit"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Unit"
+description = "Unit section."
+
+[[artifacts.RUN.headings]]
+id = "run-procedure"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Procedure"
+description = "Procedure section."
+
+[[artifacts.RUN.headings]]
+id = "run-candidate-spec"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Candidate Spec"
+description = "Candidate Spec section."
+
+[[artifacts.RUN.headings]]
+id = "run-procedure-settings"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Procedure Settings"
+description = "Procedure Settings section."
+
+[[artifacts.RUN.headings]]
+id = "run-assumptions"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Assumptions"
+description = "Assumptions section."
+
+[[artifacts.RUN.headings]]
+id = "run-inputs"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Inputs"
+description = "Inputs section."
+
+[[artifacts.RUN.headings]]
+id = "run-outputs"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Outputs"
+description = "Outputs section."
+
+[[artifacts.RUN.headings]]
+id = "run-deviations"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Deviations"
+description = "Deviations section."
+
+[[artifacts.RUN.headings]]
+id = "run-verdict"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Verdict"
+description = "Verdict section."
+
+[[artifacts.RUN.headings]]
+id = "run-reproduction"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Reproduction"
+description = "Reproduction section."
+
+[artifacts.RUN.identifiers.run]
+name = "RUN"
+description = "One execution of one procedure on one dataset snapshot: candidate spec, settings, licensed assumptions, outputs, its own verdict vector."
+required = true
+task = false
+priority = false
+to_code = false
+template = "cpt-{system}-run-{slug}"
+headings = ["run-h1-title"]
+
+[artifacts.RUN.identifiers.run.references.COMPARISON]
+# optional (no coverage key): cited from this kind when it exists
+
+
+# ── COMPARISON ──────────────────────────────────────────────────
+
+[[artifacts.COMPARISON.headings]]
+id = "comparison-h1-title"
+level = 1
+required = true
+multiple = false
+numbered = false
+description = "COMPARISON document title (H1)."
+
+[[artifacts.COMPARISON.headings]]
+id = "comparison-snapshot"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Snapshot"
+description = "Snapshot section."
+
+[[artifacts.COMPARISON.headings]]
+id = "comparison-candidates"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Candidates"
+description = "Candidates section."
+
+[[artifacts.COMPARISON.headings]]
+id = "comparison-criterion-vectors"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Criterion Vectors"
+description = "Criterion Vectors section."
+
+[[artifacts.COMPARISON.headings]]
+id = "comparison-pairwise-dominance"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Pairwise Dominance"
+description = "Pairwise Dominance section."
+
+[[artifacts.COMPARISON.headings]]
+id = "comparison-selection"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Selection"
+description = "Selection section."
+
+[[artifacts.COMPARISON.headings]]
+id = "comparison-open-pairs"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Open Pairs"
+description = "Open Pairs section."
+
+[[artifacts.COMPARISON.headings]]
+id = "comparison-hypothesis-status-updates"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Hypothesis Status Updates"
+description = "Hypothesis Status Updates section."
+
+[[artifacts.COMPARISON.headings]]
+id = "comparison-approval"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Approval"
+description = "Approval section."
+
+[artifacts.COMPARISON.identifiers.comparison]
+name = "COMPARISON"
+description = "All candidate RUNs on one snapshot in one phase: criterion vectors, pairwise dominance, selection, open pairs, hypothesis status updates."
+required = true
+task = false
+priority = false
+to_code = false
+template = "cpt-{system}-comparison-{slug}"
+headings = ["comparison-h1-title"]
+
+[artifacts.COMPARISON.identifiers.comparison.references.RUN]
+# optional (no coverage key): cited from this kind when it exists
+

@@ -1,0 +1,4 @@
+# Kit version metadata (read by cfs). Keep in sync with .cf-studio-kit.toml.
+slug = "studio-kit-core"
+name = "studio-kit-core"
+version = "0.1.0"
