@@ -46,7 +46,14 @@ def gate(path, plan=None, resolve=False):
 
 
 def example_text():
-    return EXAMPLE.read_text(encoding="utf-8")
+    """The shipped example as a draft: the base the planted-error tests mutate.
+
+    The shipped file is `verified` with an attested online gate run; tests
+    derive their cases from the draft form so each planted error is the only
+    cause of a failure.
+    """
+    t = EXAMPLE.read_text(encoding="utf-8").replace("status: verified", "status: draft", 1)
+    return "".join(ln for ln in t.splitlines(keepends=True) if not ln.startswith("- Gate, online:"))
 
 
 def blind_text(n=3):
@@ -98,10 +105,10 @@ class TestShippedExample(unittest.TestCase):
         rc, out = gate(EXAMPLE)
         self.assertEqual(rc, 0, out)
 
-    def test_example_is_draft_without_online_line(self):
-        t = example_text()
-        self.assertIn("status: draft", t)
-        self.assertNotIn("Gate, online:", t)
+    def test_example_is_verified_with_online_line(self):
+        t = EXAMPLE.read_text(encoding="utf-8")
+        self.assertIn("status: verified", t)
+        self.assertRegex(t, r"(?m)^- Gate, online: `[^`]*--plan [^`]*--resolve[^`]*`, run \d{4}-\d{2}-\d{2}: PASS")
 
     def test_example_vs_blind_plan_fails_only_on_mode(self):
         rc, out = gate(EXAMPLE, BLIND)
