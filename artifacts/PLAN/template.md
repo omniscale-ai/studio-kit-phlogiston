@@ -19,7 +19,17 @@ status: draft
 
 ## 2. Prior Knowledge
 
-{Literature or materials attached to the run, or `No additional materials`. Knowledge-base pages and memory entries injected into phase context, each marked `given`, `recalled (<page or memory id>)`, or `assumed`. A claim may enter section 8 or license a parameter range only as `verified`: quote and location in the source checked on this run. Anything not verified is `assumed` and licenses nothing.}
+**Literature mode**: {`none` | `allowed` | `blind`: copied from the run's `literature_mode` and shown at Approval (section 11), where it may be changed; when the run has no such field, proposed by the agent and confirmed by the human at Approval; never assumed. `none`: no literature is searched and no LITERATURE is produced; materials a human attached in the run's `literature` field remain allowed, marked `given` in the paragraph below, and are the only literature this PLAN may cite. `allowed`: besides the attached materials, literature enters this PLAN only through LITERATURE artifacts. `blind`: as `allowed`, plus the Excluded table: its items must not be retrieved or cited because they could reveal the answer; attached materials are checked against the Excluded table by the human at Approval (the gate does not see them).}
+
+**Excluded**: {Under `none` and `allowed` write `none` after the label and delete the table. Under `blind` the table has at least one row and no `{…}` placeholder; a `blind` PLAN with no rows is not approvable and the gate refuses it. One row per item, filled before approval: the source paper of a benchmark, its dataset name, the target equation's paper, an author group, a term. Type is `doi`, `title`, `term`, `benchmark` or `author`; matching follows the LITERATURE rules.}
+
+| Excluded item | Type | Reason |
+|---------------|------|--------|
+| {…} | {doi / title / term / benchmark / author} | {what it could reveal} |
+
+**LITERATURE drawn on**: {`cpt-{system}-literature-{slug}`, one per LITERATURE this PLAN cites, or `none`. Not checked by `lit_gate.py`; the PLAN author keeps it complete at Approval.}
+
+{Literature or materials attached to the run (its `literature` field), each marked `given`, or `No additional materials`. Knowledge-base pages and memory entries injected into phase context, each marked `given`, `recalled (<page or memory id>)`, or `assumed`. A claim from a LITERATURE cites it as `<LITERATURE ID>, claim n`, where claim n is the n-th data row of that LITERATURE's Claims table, counted from 1 in table order; a paper neither attached to the run nor in a LITERATURE Set is not cited. A claim may enter section 8 or license a parameter range only as `verified`: quote and location in the source checked on this run. Anything not verified is `assumed` and licenses nothing.}
 
 ## 3. Datasets
 
@@ -202,4 +212,4 @@ Frozen at: {date, before phase 1}. Confirmed by: {person}.
 
 ## 11. Approval
 
-{Who approved this PLAN and when, including explicit confirmation of section 4 (cost) and section 9 (metric). Per-phase approvals and rejection feedback are recorded on the RUN and DATASET artifacts they affect, with the feedback text verbatim.}
+{Who approved this PLAN and when, including explicit confirmation of section 4 (cost) and section 9 (metric), and of the literature mode in section 2 (and, under `blind`, the Excluded table). Per-phase approvals and rejection feedback are recorded on the RUN and DATASET artifacts they affect, with the feedback text verbatim.}

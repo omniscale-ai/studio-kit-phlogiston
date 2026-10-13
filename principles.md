@@ -1,7 +1,7 @@
 # Principles
 
 Cross-cutting invariants for every artifact in this kit (PLAN, DATASET, RUN,
-COMPARISON). Each `rules.md` loads this file first and keeps only what is
+COMPARISON, LITERATURE). Each `rules.md` loads this file first and keeps only what is
 specific to its own kind. A principle is
 stated once here; the per-kind line says where it lands in that artifact.
 
@@ -12,6 +12,9 @@ P1. **Every dataset declares its origin.** Ground truth (real measurements) or
     were one instrument.
     PLAN: Datasets table, Origin column. DATASET: first line of Origin and
     Source; Origin column per batch. RUN: origin counts in Unit; a simulated-data RUN is never reported as a result about the real system.
+    LITERATURE: values taken from papers are claims kept in the `scout`
+    table, never a dataset and never a third origin; they are never pooled
+    with measurements or fitted by a RUN.
 
 P2. **Units are reconciled before the first RUN.** One concordance table: each
     quantity, its unit in the model and in every dataset. A mismatch or an
@@ -30,7 +33,9 @@ P3. **Simulation time and cost are asked from a human, not assumed.** Before
     PLAN: Simulation Cost table; empty table means not approvable. DATASET:
     Actual duration per batch against the confirmed figure; a material
     departure goes into Known Defects and is raised with the human before the
-    next batch.
+    next batch. LITERATURE: Request states the cost in OpenAlex credits and
+    Consensus calls before running; Request and Sources record what was
+    actually used.
 
 P4. **Preview on the simulator before spending real experiments.** When a new
     experiment is proposed for a ground-truth apparatus and a simulator exists,
@@ -80,6 +85,8 @@ P7. **The metric is agreed with a human, argued when proposed, and frozen
     PLAN: Verdict Criteria blocks, Origin and justification and Confirmed by fields, Frozen at line. RUN: the verdict table has exactly the PLAN's rows and
     thresholds; a doubt about a criterion goes into Deviations with a proposal
     for a new PLAN, never into a re-scored, rounded, or reinterpreted row.
+    LITERATURE: a threshold found in a paper is `proposed`, never `given`; it
+    becomes a criterion only when a human confirms it in a PLAN.
 
 P8. **Candidates are compared pairwise, the verdict is a vector, and a
     ranking never replaces an experiment.** With more than two candidates there
@@ -112,7 +119,10 @@ P10. **A claim is verified before it licenses anything.** Literature and
     mechanism.
     PLAN: Prior Knowledge marks `verified` / `assumed`. RUN: Parameter ranges
     row in Assumptions is `verified` or `assumed`, and an assumed range is
-    reported as such in the verdict notes.
+    reported as such in the verdict notes. LITERATURE: Claims carry the quote
+    and its location; every DOI is looked up online (`lit_gate.py --resolve`)
+    before the artifact is `verified`; a DOI that does not resolve is marked
+    `unresolved` and its claims are `assumed`.
 
 P11. **Falsified stays falsified.** Hypothesis status is NOT YET TESTED,
     SUPPORTED or FALSIFIED, each with the batch and RUN that set it. A
@@ -120,6 +130,8 @@ P11. **Falsified stays falsified.** Hypothesis status is NOT YET TESTED,
     without new data the falsifying batch did not contain.
     PLAN: Hypothesis ID, Status field and vocabulary in Hypothesis Space; the register. COMPARISON: Hypothesis Status Updates; the only place a status
     changes, with RUN and batch as evidence. RUN: handoff names the hypothesis IDs this RUN supports or falsifies.
+    LITERATURE: Candidate Hypotheses are NOT YET TESTED proposals; they enter
+    the register only when a human adopts them in a PLAN.
 
 P12. **Human gates and their feedback are part of the record.** Every phase
     ends at a human approval gate. A rejected phase re-runs with the feedback
@@ -127,4 +139,7 @@ P12. **Human gates and their feedback are part of the record.** Every phase
     changed, with what changed because of it.
     PLAN: Phase Sequence; Approval. DATASET: Approved by per batch. RUN:
     Deviations cite the feedback verbatim. COMPARISON: Approval of the
-    selection.
+    selection. LITERATURE: the Set is approved by a person with a date before
+    analysis; Claims rows are approved before they enter a PLAN; the
+    literature mode, and under `blind` the exclusions, are set by a human in
+    the PLAN.

@@ -1,8 +1,8 @@
 # studio-kit-core
 
-A minimal kit for Constructor Studio: four artifact kinds, each with a template and rules, plus shared principles.
+A minimal kit for Constructor Studio: five artifact kinds, each with a template and rules, plus shared principles, and the literature workflow with its scripts.
 
-```
+```text
 artifacts/PLAN/template.md        PLAN structure            (agent + simulator, domain-neutral)
 artifacts/PLAN/rules.md           rules for the agent       (your 5 + 5 agent-specific + principles map)
 artifacts/DATASET/template.md     DATASET structure         (agent + simulator, MEASUREMENT/SYNTHESIS axes)
@@ -11,11 +11,17 @@ artifacts/RUN/template.md         RUN structure             (one procedure on on
 artifacts/RUN/rules.md            rules for the agent       (10 rules + principles map)
 artifacts/COMPARISON/template.md  COMPARISON structure      (candidates on one snapshot: vectors, dominance, selection, open pairs)
 artifacts/COMPARISON/rules.md     rules for the agent       (7 rules + principles map)
+artifacts/LITERATURE/template.md  LITERATURE structure      (one literature request along one of four strategies)
+artifacts/LITERATURE/rules.md     rules for the agent       (11 rules + principles map)
+artifacts/LITERATURE/examples/    worked example            (Path 1, related work, gate PASS online with --plan)
+workflows/literature.md           literature workflow       (intake, four strategies, human gates)
+scripts/lit_run.py                literature retrieval      (OpenAlex REST, stdlib only; writes the draft LITERATURE)
+scripts/lit_gate.py               LITERATURE gate           (L1–L11; --resolve for DOIs; --resolve and --plan for verified)
+tests/                            literature tests          (gate on the shipped example and a corrupted copy)
 principles.md                     12 cross-cutting invariants, loaded first by every rules.md
 AGENTS.md                         agent quick reference, public rule: lands in the project's generated AGENTS.md
 constraints.toml                  headings + IDs for cfs validate (generated from the templates)
 .cf-studio-kit.toml               manifest
-_later/                           everything deferred: 4 kinds, checklists, workflows, gates, full manifest
 ```
 
 ## What remains to be done
@@ -33,7 +39,7 @@ cfs kit install --path ./kits/studio-kit-core --install-mode register   # path i
 cfs validate-kits
 ```
 
-Then register the system in the project's `artifacts.toml` (verified end-to-end):
+Then register the system in the project's `artifacts.toml` (verified end-to-end for PLAN, DATASET, RUN and COMPARISON):
 
 ```toml
 [[systems]]
@@ -66,6 +72,11 @@ required = false
 pattern = "comparisons/*.md"
 traceability = "DOCS-ONLY"
 required = false
+
+[systems.autodetect.artifacts.LITERATURE]
+pattern = "literature/*.md"
+traceability = "DOCS-ONLY"
+required = false
 ```
 
 After that, `cf-write-docs: write the PLAN for ...` uses your template and rules, `cfs toc <file>` generates the
@@ -74,7 +85,110 @@ with no checkbox and no priority.
 
 ## How to bring back deferred items
 
-Artifact kind: move `_later/artifacts/<KIND>/` back, add two resources to the manifest
+Deferred items are kept outside this kit; to bring one back, copy it into the kit and register it.
+Artifact kind: copy its `artifacts/<KIND>/` directory in, add two resources to the manifest
 (`<kind>_template`, `<kind>_rules`) and a headings block to `constraints.toml`.
-Checklist: move the file back, add a resource with `kind = "checklist"`. Needed only for semantic review.
-Workflow: `_later/workflows/*.md`, resource with `kind = "skill"`, `public = true`.
+Checklist: copy the file in, add a resource with `kind = "checklist"`. Needed only for semantic review.
+Workflow: copy it into `workflows/`, add a resource with `kind = "skill"`, `public = true`.
+
+## Literature block
+
+A fifth artifact kind, LITERATURE, and the workflow that produces it. One
+request = one of four fixed strategies = one artifact:
+
+| strategy | what it delivers | mechanical part (`scripts/lit_run.py`) | the agent's part |
+|---|---|---|---|
+| `related` | what was done before one paper | references, citers, related and same-topic works from OpenAlex | prior work grouped by sub-problem, each assertion citing a Set row |
+| `review` | the subject area by groups | landscape counts by year/topic/institution/venue/author; anchors; one-hop snowball; a Groups table from co-authorship | one block per group with an assessment and its evidence; cross-group observations |
+| `metareview` | trends from the reviews only | reviews restricted to the subject's topics and words | per-review scope, period, trends, gaps; agreement and contradiction between reviews; no primary-source claim |
+| `scout` | a data table | candidates ranked by measurement signals, OA links, CSV skeleton | one row per measurement with the passage it came from; no passage, no value |
+
+`workflows/literature.md` is the procedure (intake questions, the path's
+steps, where a human approves). `artifacts/LITERATURE/{template,rules}.md`
+define the record; `constraints.toml` and the manifest register it.
+
+Literature mode. Every PLAN of an agent run states it in section 2, Prior
+Knowledge, and a human confirms it at PLAN approval; there is no default.
+
+| mode | what it allows |
+|---|---|
+| `none` | no literature is searched and no LITERATURE is produced (the literature workflow refuses to run); materials a human attached in the run's `literature` field remain allowed, marked `given` in the PLAN's section 2, and are the only literature the PLAN may cite |
+| `allowed` | besides the attached materials, literature enters the PLAN only through LITERATURE artifacts, cited as `<LITERATURE ID>, claim n` |
+| `blind` | as `allowed`, plus the PLAN's Excluded table: items (`doi`, `title`, `term`, `benchmark`, `author`) that must not be retrieved or cited because they could reveal the answer; attached materials are checked against the Excluded table by the human at Approval (the gate does not see them) |
+
+Under `blind` an excluded item is matched case-insensitively (LITERATURE
+rule 11): a `doi` item exactly, the other types as a substring. Offline the
+gate compares `doi` items with the DOI cell and the other types with the
+DOI, title and OA link cells of every Set row, with Analysis and Claims, and
+with the Request and the Sources query column (a query that contains an
+excluded item means it was retrieved). Venue and authors are not Set columns
+and are compared only with `--resolve`, against the OpenAlex record of each
+row that has a DOI. An offline PASS under `blind` therefore does not clear
+`author` items; only the online PASS with `--plan` does. A matched paper is
+removed from the Set and counted in Sources, never named.
+
+Values found by `scout` stay in the LITERATURE: a table in the artifact plus
+the CSV beside it. They reach a PLAN only as `verified` claims in its
+section 2, where they may license a parameter range or a hypothesis. They
+never become a DATASET; there is no `literature` origin, and no RUN fits
+them.
+
+The gate:
+
+```bash
+python3 scripts/lit_gate.py <file>.md [--plan <PLAN.md>] [--resolve]
+```
+
+Exit 0 PASS, 1 FAIL, 2 usage; the checks are L1–L11 in the LITERATURE
+rules. On every invocation it refuses an artifact whose `verified` claims
+lack a quote or a location or rest on a row not resolved `yes`, whose
+analysis cites Set rows that do not exist, whose candidate hypotheses cite
+no claim, whose Set approval lacks a person and a date, or whose Hypothesis
+collection holds less than half the approved set. With `--resolve` it looks
+up every DOI in OpenAlex (network). With `--plan` it reads the PLAN's
+Literature mode and Excluded table and fails if the PLAN's mode is `none`,
+if the Request's `PLAN:` ID or Literature mode differs from the PLAN's, or,
+under `blind`, on any excluded hit or if `Exclusions checked` differs from
+the PLAN's Excluded row count; a Request that says `blind` fails without
+`--plan`. A LITERATURE becomes `verified` only after a PASS of an online
+invocation that has both `--resolve` and `--plan`; a run without `--plan` is
+a structural check only and never clears blind compliance. The PLAN's
+`LITERATURE drawn on` line is not checked by the gate; the PLAN author keeps
+it complete at Approval. The artifact's Attestation records each
+invocation, offline or online, and its result. `tests/test_literature.py`
+gates the shipped example and a corrupted scratch copy of it.
+
+## Installing the literature sources
+
+The kit ships no key. The minimum is OpenAlex, keyless: retrieval and DOI
+verification run on it alone. Consensus and Constructor Hypothesis are
+optional MCP sources; a source that is not configured is skipped and the
+artifact's Sources section says so.
+
+What the user must supply:
+
+| source | access | the user supplies |
+|---|---|---|
+| OpenAlex | REST keyless (about 1000 credits a day: search = 10, work = 1); MCP `https://mcp.openalex.org/mcp` | nothing for keyless REST; optionally a free OpenAlex account and key in `OPENALEX_API_KEY` for ten times the budget, or for the MCP, which needs a sign-in through the browser once |
+| Consensus | REST `https://api.consensus.app/v1/search` (header `x-api-key`); MCP `https://mcp.consensus.app/mcp` | a Consensus account and a key in `CONSENSUS_API_KEY` (profile menu, API & MCP Dashboard, Keys and clients, New key; shown once); the free plan gives 30 calls a month, shared with its MCP; full-text passages, overage and recurring use need a paid plan |
+| Constructor Hypothesis | MCP `https://constructor.app/api/hypothesis-mcp/streamable-http`, header `X-Model-AccessKey` | a Constructor Hypothesis account; a collection relevant to the run, built (uploads, Zotero or the product's search) and indexed before the workflow runs; an access key in `HYPOTHESIS_MCP_KEY`, renewed every 30 days |
+
+MCP entries for Claude Code:
+
+```bash
+claude mcp add --transport http openalex   https://mcp.openalex.org/mcp
+claude mcp add --transport http consensus  https://mcp.consensus.app/mcp
+claude mcp add --transport http hypothesis https://constructor.app/api/hypothesis-mcp/streamable-http \
+    --header "X-Model-AccessKey: $HYPOTHESIS_MCP_KEY"
+```
+
+Environment for scripted access:
+
+```bash
+export OPENALEX_API_KEY=...      # optional: ten times the keyless OpenAlex budget
+export CONSENSUS_API_KEY=...     # required for any Consensus REST call
+export HYPOTHESIS_MCP_KEY=...    # required for the Hypothesis MCP; renew every 30 days
+```
+
+The project's CLAUDE.md lists which of the three sources are configured;
+each LITERATURE's Sources section records which ran.
