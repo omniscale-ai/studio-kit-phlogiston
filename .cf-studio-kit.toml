@@ -1,5 +1,4 @@
 # Constructor Studio canonical kit manifest for studio-kit-core (minimal cut).
-# Full version with SCREEN/VERDICT/CALIBRATION/CLAIM, checklists, workflows and gates: _later/.cf-studio-kit.full.toml
 # Resource ids double as template variables inside rules files: {plan_template}, {run_rules}, ...
 
 manifest_version = "1.0"
@@ -7,7 +6,7 @@ manifest_version = "1.0"
 [[kits]]
 slug = "studio-kit-core"
 name = "studio-kit-core"
-version = "0.1.0"
+version = "0.2.0"
 
 # ── PLAN ────────────────────────────────────────────────────────
 [[kits.resources]]
@@ -94,7 +93,7 @@ install_path = "AGENTS.md"
 type = "file"
 user_modifiable = true
 public = true
-description = "Agent quick reference: the four artifact kinds, their resources, and navigation rules"
+description = "Agent quick reference: the five artifact kinds, their resources, and navigation rules"
 
 # ── shared principles (loaded by every rules.md via {principles})
 [[kits.resources]]
@@ -104,7 +103,65 @@ source = "principles.md"
 install_path = "principles.md"
 type = "file"
 user_modifiable = true
-description = "Cross-cutting invariants P1–P12 shared by PLAN, DATASET and RUN rules"
+description = "Cross-cutting invariants P1–P12 shared by PLAN, DATASET, RUN, COMPARISON and LITERATURE rules"
+
+# ── LITERATURE ─────────────────────────────────────────────────────
+[[kits.resources]]
+id = "literature_template"
+kind = "template"
+source = "artifacts/LITERATURE/template.md"
+install_path = "artifacts/LITERATURE/template.md"
+type = "file"
+user_modifiable = true
+description = "LITERATURE artifact template (one request along one of four strategies: set, sources, verified claims, candidate hypotheses)"
+
+[[kits.resources]]
+id = "literature_rules"
+kind = "other"
+source = "artifacts/LITERATURE/rules.md"
+install_path = "artifacts/LITERATURE/rules.md"
+type = "file"
+user_modifiable = true
+description = "LITERATURE authoring rules and gate rules L1-L11"
+
+# ── literature workflow (public skill: the four strategies; name from its frontmatter)
+[[kits.resources]]
+id = "literature_workflow"
+kind = "skill"
+source = "workflows/literature.md"
+install_path = "workflows/literature.md"
+type = "file"
+user_modifiable = true
+public = true
+description = "Literature workflow: related work, subject review by groups, meta-review, experimental data collection, gated by the PLAN's literature mode"
+
+# ── literature scripts (stdlib Python; OpenAlex REST)
+[[kits.resources]]
+id = "lit_common"
+kind = "script"
+source = "scripts/lit_common.py"
+install_path = "scripts/lit_common.py"
+type = "file"
+user_modifiable = false
+description = "Shared parsing and exclusion matching for lit_run and lit_gate"
+
+[[kits.resources]]
+id = "lit_run"
+kind = "script"
+source = "scripts/lit_run.py"
+install_path = "scripts/lit_run.py"
+type = "file"
+user_modifiable = false
+description = "Retrieval half of a literature strategy against OpenAlex; writes the draft LITERATURE"
+
+[[kits.resources]]
+id = "lit_gate"
+kind = "script"
+source = "scripts/lit_gate.py"
+install_path = "scripts/lit_gate.py"
+type = "file"
+user_modifiable = false
+description = "Gate for LITERATURE artifacts: rules L1-L11, offline by default, --resolve online, --plan for mode and exclusions"
 
 # ── constraints (keep LAST: the artifact bindings below attach to this resource)
 [[kits.resources]]
@@ -114,7 +171,7 @@ source = "constraints.toml"
 install_path = "constraints.toml"
 type = "file"
 user_modifiable = true
-description = "Deterministic structural constraints for PLAN, DATASET, RUN, COMPARISON"
+description = "Deterministic structural constraints for PLAN, DATASET, RUN, COMPARISON, LITERATURE"
 
 [kits.resources.artifacts.PLAN]
 template = "plan_template"
@@ -131,3 +188,7 @@ rules = "run_rules"
 [kits.resources.artifacts.COMPARISON]
 template = "comparison_template"
 rules = "comparison_rules"
+
+[kits.resources.artifacts.LITERATURE]
+template = "literature_template"
+rules = "literature_rules"

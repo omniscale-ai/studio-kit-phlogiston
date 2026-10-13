@@ -477,3 +477,98 @@ headings = ["comparison-h1-title"]
 [artifacts.COMPARISON.identifiers.comparison.references.RUN]
 # optional (no coverage key): cited from this kind when it exists
 
+
+# ── LITERATURE ──────────────────────────────────────────────────
+
+[[artifacts.LITERATURE.headings]]
+id = "literature-h1-title"
+level = 1
+required = true
+multiple = false
+numbered = false
+description = "LITERATURE document title (H1)."
+
+[[artifacts.LITERATURE.headings]]
+id = "literature-request"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Request"
+description = "Request section: strategy, anchor or subject, bounds, depth, output shape, cost."
+
+[[artifacts.LITERATURE.headings]]
+id = "literature-sources"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Sources"
+description = "Sources section: which ran, which were skipped, canonical queries, budget used."
+
+[[artifacts.LITERATURE.headings]]
+id = "literature-set"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Set"
+description = "Set section: every paper the analysis may cite, resolved flag, approval."
+
+[[artifacts.LITERATURE.headings]]
+id = "literature-collection"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Collection"
+description = "Collection section: Hypothesis collection coverage, or 'not used'."
+
+[[artifacts.LITERATURE.headings]]
+id = "literature-analysis"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Analysis"
+description = "Analysis section in the strategy's shape, citing Set rows."
+
+[[artifacts.LITERATURE.headings]]
+id = "literature-claims"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Claims"
+description = "Claims section: quote, location, verified or assumed."
+
+[[artifacts.LITERATURE.headings]]
+id = "literature-candidate-hypotheses"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Candidate Hypotheses"
+description = "Candidate Hypotheses section: proposed rows for the PLAN Hypothesis Space, or 'none'."
+
+[[artifacts.LITERATURE.headings]]
+id = "literature-attestation"
+level = 2
+required = true
+multiple = false
+numbered = true
+pattern = "Attestation"
+description = "Attestation section: scripts, invocation, gate result, approvals."
+
+[artifacts.LITERATURE.identifiers.literature]
+name = "LITERATURE"
+description = "One literature request run along one of the four strategies: the set, the sources, verified claims, candidate hypotheses."
+required = true
+task = false
+priority = false
+to_code = false
+template = "cpt-{system}-literature-{slug}"
+headings = ["literature-h1-title"]
+
+[artifacts.LITERATURE.identifiers.literature.references.PLAN]
+# optional (no coverage key): a PLAN's Prior Knowledge cites the LITERATURE it drew on
