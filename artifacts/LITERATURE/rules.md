@@ -96,8 +96,11 @@
     if the PLAN's mode is `none`, if the Request's `PLAN:` ID differs from
     the PLAN's ID, if the Request's Literature mode differs from the PLAN's,
     and, under `blind`, on any excluded hit or if `Exclusions checked`
-    differs from the PLAN's Excluded row count (L11). A LITERATURE whose
-    Request says `blind` fails without `--plan`. The PLAN's `LITERATURE
+    differs from the PLAN's Excluded row count (L11). Without `--plan` L11
+    passes only when the Request's Literature mode is exactly `allowed`;
+    `blind` and any other value fail. `scripts/lit_run.py` refuses (exit 2,
+    before any request) to overwrite an existing artifact or CSV unless
+    `--force` is given. The PLAN's `LITERATURE
     drawn on` line is not checked by the gate; keeping it complete is the
     PLAN author's duty at Approval.
 
@@ -119,7 +122,7 @@ exit 0 PASS, 1 FAIL, 2 usage. Every invocation runs all checks it can;
 | L8 | every source marked `ran: yes` records its query (rule 5) |
 | L9 | status `verified` only if L1–L8, L10 and L11 pass and the Attestation records an `online` PASS whose invocation has `--resolve` and `--plan`; an offline run on a `verified` file fails L9 when no such Attestation line exists (rule 10) |
 | L10 | under `scout`, every CSV value carries its passage (rule 7) |
-| L11 | with `--plan`: the PLAN's mode is not `none`, the Request's `PLAN:` ID and Literature mode equal the PLAN's, and under `blind` there is no excluded hit and `Exclusions checked` equals the PLAN's Excluded row count; without `--plan`: the Request does not say `blind` (rule 11) |
+| L11 | with `--plan`: the PLAN's mode is not `none`, the Request's `PLAN:` ID and Literature mode equal the PLAN's, and under `blind` there is no excluded hit and `Exclusions checked` equals the PLAN's Excluded row count; without `--plan`: the Request's Literature mode is exactly `allowed` (rule 11) |
 
 ## Where the principles land in a LITERATURE
 

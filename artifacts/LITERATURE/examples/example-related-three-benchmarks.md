@@ -1,6 +1,6 @@
 ---
-description: Worked example (Path 1, related work, literature mode allowed) on "Three Benchmarks Addressing Open Challenges in Nonlinear System Identification": 36 papers in the set, 2 claims (1 verified, 1 assumed), gate PASS offline and online (with `--plan`), 46 of 84 OpenAlex credits used.
-status: verified
+description: "Worked example (Path 1, related work, literature mode allowed) on \"Three Benchmarks Addressing Open Challenges in Nonlinear System Identification\": 36 papers in the set, 2 claims (1 verified, 1 assumed), gate PASS offline with `--plan` (not yet online), 14 of 84 OpenAlex credits used for retrieval."
+status: draft
 ---
 
 # LITERATURE — related: Three Benchmarks Addressing Open Challenges in Nonlinear System Identification
@@ -31,7 +31,7 @@ status: verified
 - Depth: quick
 - Output shape: reading list.
 - Cost stated before running: OpenAlex only, ≤ 84 credits.
-- Cost used: 46 OpenAlex credits of the 84 stated: 14 for retrieval (5 requests; 934 remaining that day) and 32 for the online gate's DOI lookups (32 work lookups, 1 credit each; section 8).
+- Cost used: 14 OpenAlex credits of the 84 stated, all for retrieval (5 requests; 934 remaining that day); no online gate run yet, so no DOI lookups are counted.
 
 ## 2. Sources
 
@@ -113,5 +113,4 @@ none — the Set is consistent on the anchor's question.
 - Retrieval: `python3 scripts/lit_run.py related 10.1016/j.ifacol.2017.08.071 --system ctank --out architecture/literature -n 12`, run 2026-10-12; `scripts/lit_run.py` 0.1.0, OpenAlex REST keyless (`https://api.openalex.org`), 5 requests, 14 credits.
 - Set approved by A. Shumilov, 2026-10-12.
 - Hand-over to `cpt-ctank-plan-example` section 2: claim 1 `verified`, claim 2 `assumed`; approved by A. Shumilov, 2026-10-12.
-- Gate, offline: `python3 scripts/lit_gate.py architecture/literature/example-related-three-benchmarks.md`, run 2026-10-12: PASS; structural checks only.
-- Gate, online: `python3 scripts/lit_gate.py architecture/literature/example-related-three-benchmarks.md --plan architecture/PLAN.md --resolve`, run 2026-10-12: PASS; 32 DOIs looked up in OpenAlex (32 credits), 32 resolved; 4 rows `no DOI`. Status set to `verified` on this result.
+- Gate, offline: `python3 scripts/lit_gate.py artifacts/LITERATURE/examples/example-related-three-benchmarks.md --plan tests/fixtures/plan-allowed.md`, run 2026-10-14: PASS; structural checks and PLAN checks, no DOI lookups. Status stays `draft` until an online gate run with `--resolve` and `--plan` passes.

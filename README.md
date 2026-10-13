@@ -149,8 +149,10 @@ up every DOI in OpenAlex (network). With `--plan` it reads the PLAN's
 Literature mode and Excluded table and fails if the PLAN's mode is `none`,
 if the Request's `PLAN:` ID or Literature mode differs from the PLAN's, or,
 under `blind`, on any excluded hit or if `Exclusions checked` differs from
-the PLAN's Excluded row count; a Request that says `blind` fails without
-`--plan`. A LITERATURE becomes `verified` only after a PASS of an online
+the PLAN's Excluded row count; without `--plan` it passes only a Request
+whose Literature mode is exactly `allowed`. `scripts/lit_run.py` refuses to
+overwrite an existing artifact or CSV (exit 2, before any request) unless
+`--force` is given. A LITERATURE becomes `verified` only after a PASS of an online
 invocation that has both `--resolve` and `--plan`; a run without `--plan` is
 a structural check only and never clears blind compliance. The PLAN's
 `LITERATURE drawn on` line is not checked by the gate; the PLAN author keeps
