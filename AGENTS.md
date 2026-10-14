@@ -24,6 +24,10 @@ ALWAYS open the kind's `rules.md` and `template.md` from the table above WHEN au
 
 ALWAYS run `cfs validate` on every written artifact before presenting it; for a LITERATURE also run `python3 {lit_gate} <file> --plan <PLAN>` once the analysis is written; the draft Set shown at the Set gate is exempt from both `cfs validate` and the gate; run `--resolve` only after the human's go (network, credits); `verified` needs that online PASS with `--plan`; follow `{literature_workflow}` Closing
 
+ALWAYS append the batch to `architecture/design_log.jsonl` with `python3 {design_log} append` BEFORE calling the experiment tool, and never edit or delete a line of it
+
+ALWAYS copy section 6 Justification and Design method of a DATASET from the design log, and run `python3 {design_gate} architecture/design_log.jsonl --source <acquisitions> --dataset <DATASET>` next to `cfs validate` before presenting it
+
 ALWAYS follow `{literature_workflow}` WHEN literature is to be searched, cited or put into a PLAN
 
 NEVER search literature WHEN there is no PLAN, its Literature mode is `none`, or the mode is not yet confirmed by the human

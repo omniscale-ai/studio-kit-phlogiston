@@ -55,10 +55,12 @@ P5. **New points are designed, not guessed.** Every proposed experiment is
     why the tool was not used. A point that duplicates an existing condition
     within noise, or has no justification, is not run. "Explore" is not a
     justification.
-    PLAN: Experiment Design Policy. DATASET: Justification and Design method
-    columns per batch, written before the call. RUN: Outputs end with the
-    handoff (variance and boundary targets). COMPARISON: Open Pairs are the
-    only `information →` targets.
+    PLAN: Experiment Design Policy. DATASET: Justification per experiment and
+    Design method per batch, copied from the append-only design log written
+    before the call and checked against a non-agent time source by
+    `{design_gate}`.
+    RUN: Outputs end with the handoff (variance and boundary targets).
+    COMPARISON: Open Pairs are the only `information →` targets.
 
 P6. **A hypothesis is the fewest free parameters that explain, plus where it holds; equal quality goes to the fewer parameters.** The starting candidate is the simplest one; every further hypothesis states how many free parameters it adds and the conditions under which it is claimed to apply. The PLAN
     declares what "equal quality" means before any RUN; among candidates within

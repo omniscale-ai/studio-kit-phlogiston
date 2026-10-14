@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""Pre-registration log for DATASET batches (P5). Stdlib only.
+
+    python3 scripts/design_log.py append --log <design_log.jsonl> --batch <id> --phase <phase>
+            --points <json or file> [--justification '<type> → <target>']
+            --design-method '<tool, criterion, seed>' | 'manual: <reason>'
+    python3 scripts/design_log.py hook --log <design_log.jsonl> --witness <design_witness.jsonl>
+            (--points-key <dotted key into tool_input> | --points <json or file>) [--tool <name>]
+
+`append` writes one entry: seq, prev (sha256 of the previous line), written_at
+(UTC, taken from the clock, not from the caller), batch, phase, points,
+design_method. Every point has a name, its conditions and exactly one
+justification (P5): its own `justification` in --points, or the
+--justification default for points that give none. Entries are never edited
+or deleted.
+
+`hook` is the integration point before an experiment call. As a Claude Code
+PreToolUse hook it reads the hook JSON from stdin; from a CLI wrapper it takes
+--points. It admits the call only if every point matches an unused point of
+the latest entry, then appends a witness record (time, tool, design_lines,
+design_head, points). Exit 0 admit, 2 block (reason on stderr), 1 usage error.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+import math
+import re
+import sys
+from pathlib import Path
+
+TYPES = ("variance", "information", "boundary")
+FIELDS = ("seq", "prev", "written_at", "batch", "phase", "points", "design_method")
+RTOL, ATOL = 1e-6, 1e-9
+
+
+# ── parsing ─────────────────────────────────────────────────────
+
+def parse_time(v):
+    """ISO 8601 with an offset (or Z), or epoch seconds, to an aware datetime; None if invalid."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return dt.datetime.fromtimestamp(v, dt.timezone.utc) if math.isfinite(v) else None
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    if re.fullmatch(r"\d+(\.\d+)?", s):
+        return dt.datetime.fromtimestamp(float(s), dt.timezone.utc)
+    try:
+        t = dt.datetime.fromisoformat(re.sub(r"Z$", "+00:00", s))
+    except ValueError:
+        return None
+    return t if t.tzinfo is not None else None
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
+
+
+def norm_points(raw) -> list:
+    """Points as [{'name': str|None, 'conditions': {key: value}}].
+
+    Accepts a list of {'name', 'conditions'[, 'justification']} objects, a list
+    of bare condition objects, or a mapping label -> conditions (the shape of a
+    simulate request) or label -> {'conditions', 'justification'}. A point's
+    justification is kept raw under 'justification' (None if absent).
+    Raises ValueError on anything else."""
+    if isinstance(raw, dict):
+        raw = [{**v, "name": k} if isinstance(v, dict) and isinstance(v.get("conditions"), dict)
+               else {"name": k, "conditions": v} for k, v in raw.items()]
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("points must be a non-empty list or a non-empty label -> conditions mapping")
+    out = []
+    for p in raw:
+        just = None
+        if isinstance(p, dict) and isinstance(p.get("conditions"), dict):
+            name, cond, just = p.get("name"), p["conditions"], p.get("justification")
+        elif isinstance(p, dict):
+            name, cond = None, p
+        else:
+            raise ValueError(f"point {p!r} is not an object")
+        if not cond:
+            raise ValueError("a point has no conditions")
+        for k, v in cond.items():
+            if isinstance(v, bool) or not isinstance(v, (int, float, str)):
+                raise ValueError(f"condition {k}={v!r} is neither a number nor a string")
+            if isinstance(v, float) and not math.isfinite(v):
+                raise ValueError(f"condition {k}={v!r} is not finite")
+        out.append({"name": None if name is None else str(name), "conditions": dict(cond), "justification": just})
+    return out
+
+
+def same_point(a: dict, b: dict, rtol=RTOL, atol=ATOL) -> bool:
+    """Same condition keys; numbers within tolerance, strings equal."""
+    if set(a) != set(b):
+        return False
+    for k in a:
+        x, y = a[k], b[k]
+        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+            if not math.isclose(x, y, rel_tol=rtol, abs_tol=atol):
+                return False
+        elif str(x).strip() != str(y).strip():
+            return False
+    return True
+
+
+def norm_text(s: str) -> str:
+    """Comparison form of a justification target or design method."""
+    s = str(s).replace("`", "").replace("->", "→")
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def parse_justification(s):
+    """'<type> → <target>' or {type, target} to (type, target); None if malformed."""
+    if isinstance(s, dict):
+        ty, tg = s.get("type"), s.get("target")
+        return (ty, tg.strip()) if ty in TYPES and isinstance(tg, str) and tg.strip() else None
+    if not isinstance(s, str):
+        return None
+    m = re.fullmatch(r"\s*(\w+)\s*→\s*(.+?)\s*", str(s).replace("`", "").replace("->", "→"))
+    if not m or m.group(1).lower() not in TYPES:
+        return None
+    return m.group(1).lower(), m.group(2)
+
+
+# ── the log ─────────────────────────────────────────────────────
+
+def raw_lines(path) -> list:
+    """Non-empty lines of the log, without their newline, exactly as stored."""
+    text = Path(path).read_bytes().decode("utf-8")
+    return [ln for ln in text.split("\n") if ln.strip()]
+
+
+def line_hash(line: str) -> str:
+    return hashlib.sha256(line.encode("utf-8")).hexdigest()
+
+
+def prefix_hash(lines: list, n: int) -> str:
+    """sha256 of the first n lines, each terminated by a newline."""
+    return hashlib.sha256("".join(ln + "\n" for ln in lines[:n]).encode("utf-8")).hexdigest()
+
+
+def load_log(path):
+    """(lines, entries, problems). An entry is the parsed dict with its points
+    normalised; problems are (rule, message) for malformed lines (D1) and
+    broken append-only evidence (D2)."""
+    lines = raw_lines(path)
+    entries, probs = [], []
+    seen_batch, last_t = {}, None
+    for i, ln in enumerate(lines, 1):
+        try:
+            e = json.loads(ln)
+        except json.JSONDecodeError as exc:
+            probs.append(("D1", f"line {i}: not JSON ({exc.msg})"))
+            entries.append(None)
+            continue
+        if not isinstance(e, dict):
+            probs.append(("D1", f"line {i}: not a JSON object"))
+            entries.append(None)
+            continue
+        missing = [f for f in FIELDS if f not in e]
+        if missing:
+            probs.append(("D1", f"line {i}: missing field(s) {', '.join(missing)}"))
+        if e.get("seq") != i:
+            probs.append(("D1", f"line {i}: seq is {e.get('seq')!r}, expected {i} (entries are numbered 1, 2, … in file order)"))
+        want = None if i == 1 else line_hash(lines[i - 2])
+        if e.get("prev") != want:
+            probs.append(("D2", f"line {i}: prev does not match the sha256 of line {i - 1}; "
+                                "an earlier line was edited, removed or reordered" if i > 1 else
+                                "line 1: prev must be null"))
+        t = parse_time(e.get("written_at"))
+        if t is None:
+            probs.append(("D1", f"line {i}: written_at {e.get('written_at')!r} is not ISO 8601 with an offset"))
+        elif last_t is not None and t < last_t:
+            probs.append(("D2", f"line {i}: written_at {e['written_at']} is earlier than the line before it"))
+        if t is not None:
+            last_t = t
+        b = str(e.get("batch", "")).strip()
+        if not b:
+            probs.append(("D1", f"line {i}: batch is empty"))
+        elif b in seen_batch:
+            probs.append(("D1", f"line {i}: batch {b} already registered on line {seen_batch[b]}; "
+                                "a re-planned batch gets a new batch id"))
+        else:
+            seen_batch[b] = i
+        try:
+            pts = norm_points(e.get("points"))
+        except ValueError as exc:
+            probs.append(("D1", f"line {i}: {exc}"))
+            pts = []
+        names = set()
+        for k, q in enumerate(pts, 1):
+            nm = (q["name"] or "").strip()
+            if not nm:
+                probs.append(("D1", f"line {i}: point {k} has no name"))
+            elif nm in names:
+                probs.append(("D1", f"line {i}: point name {nm} is used twice in the batch"))
+            names.add(nm)
+            q["just"] = parse_justification(q["justification"])
+            if q["just"] is None:
+                probs.append(("D1", f"line {i}: point {nm or k} needs exactly one justification {{type, target}} "
+                                    f"with type {', '.join(TYPES)} and a target (P5); got {q['justification']!r}"))
+        dm = e.get("design_method")
+        if not isinstance(dm, str) or not dm.strip():
+            probs.append(("D1", f"line {i}: design_method is empty"))
+        elif re.match(r"\s*manual\s*:", dm, re.I) and not dm.split(":", 1)[1].strip():
+            probs.append(("D1", f"line {i}: design_method `manual:` gives no reason the tool was not used (P5)"))
+        entries.append({"seq": i, "batch": b, "phase": e.get("phase"), "time": t, "written_at": e.get("written_at"),
+                        "points": pts, "design_method": dm if isinstance(dm, str) else ""})
+    return lines, entries, probs
+
+
+def make_entry(lines: list, batch, phase, points, justification, design_method, written_at=None) -> str:
+    """The JSON line that appends one entry after `lines`. `justification` is the
+    default for points that carry none: None, one string or a one-item list.
+    Raises ValueError on bad input."""
+    if isinstance(justification, (list, tuple)):
+        if len(justification) > 1:
+            raise ValueError("one default justification at most; give per-point justifications inside --points")
+        justification = justification[0] if justification else None
+    pts = norm_points(points)
+    out = []
+    for k, q in enumerate(pts, 1):
+        name = (q["name"] or "").strip()
+        if not name:
+            raise ValueError(f"point {k} has no name; give points as label -> conditions or with a `name`")
+        if name in (o["name"] for o in out):
+            raise ValueError(f"point name {name} is used twice")
+        raw = q["justification"] if q["justification"] is not None else justification
+        if raw is None:
+            raise ValueError(f"point {name} has no justification and no default --justification was given (P5)")
+        if isinstance(raw, list):
+            raise ValueError(f"point {name}: exactly one justification per point (P5)")
+        pj = parse_justification(raw)
+        if pj is None:
+            raise ValueError(f"point {name}: justification {raw!r} is not `<variance|information|boundary> → <target>`")
+        out.append({"name": name, "conditions": q["conditions"], "justification": {"type": pj[0], "target": pj[1]}})
+    if not str(design_method).strip():
+        raise ValueError("design method is required")
+    if not str(batch).strip():
+        raise ValueError("batch is required")
+    e = {"seq": len(lines) + 1, "prev": line_hash(lines[-1]) if lines else None,
+         "written_at": written_at or now_iso(), "batch": str(batch).strip(), "phase": phase,
+         "points": out, "design_method": str(design_method).strip()}
+    return json.dumps(e, ensure_ascii=False, separators=(", ", ": "))
+
+
+def append_entry(path, *args, **kw) -> str:
+    """Append one entry to the log at `path` (created if absent); return the line."""
+    p = Path(path)
+    lines = raw_lines(p) if p.is_file() else []
+    line = make_entry(lines, *args, **kw)
+    data = p.read_bytes() if p.is_file() else b""
+    with open(p, "ab") as f:
+        if data and not data.endswith(b"\n"):
+            f.write(b"\n")
+        f.write((line + "\n").encode("utf-8"))
+    return line
+
+
+# ── the hook ────────────────────────────────────────────────────
+
+def dig(obj, key: str):
+    for part in key.split("."):
+        if not isinstance(obj, dict) or part not in obj:
+            raise KeyError(key)
+        obj = obj[part]
+    return obj
+
+
+def read_json_arg(s: str):
+    s = s.strip()
+    return json.loads(s if s[:1] in "[{" else Path(s).read_text(encoding="utf-8"))
+
+
+def admit(log, witness, points, tool="") -> str:
+    """Admit one experiment call or raise PermissionError with the reason.
+    On admission append a witness record and return it."""
+    if not Path(log).is_file():
+        raise PermissionError(f"no design log at {log}: append the batch with design_log.py append before the call (P5)")
+    lines, entries, probs = load_log(log)
+    if probs:
+        raise PermissionError("design log is not valid: " + "; ".join(f"[{r}] {m}" for r, m in probs[:5]))
+    if not entries:
+        raise PermissionError("design log is empty: append the batch before the call (P5)")
+    n, open_e = len(lines), entries[-1]
+    pts = norm_points(points)
+    used = []
+    wp = Path(witness)
+    if wp.is_file():
+        for ln in raw_lines(wp):
+            try:
+                w = json.loads(ln)
+            except json.JSONDecodeError:
+                raise PermissionError(f"witness {witness} has a line that is not JSON; it is written by this hook only")
+            if w.get("design_lines") == n and w.get("design_head") == prefix_hash(lines, n):
+                used += [q["conditions"] for q in norm_points(w.get("points"))]
+    free = list(open_e["points"])
+    for u in used:
+        for k, q in enumerate(free):
+            if same_point(q["conditions"], u):
+                del free[k]
+                break
+    for p in pts:
+        for k, q in enumerate(free):
+            if same_point(q["conditions"], p["conditions"]):
+                del free[k]
+                break
+        else:
+            raise PermissionError(
+                f"point {json.dumps(p['conditions'], sort_keys=True)} is not an unused point of the latest design-log "
+                f"entry (seq {n}, batch {open_e['batch']}); append an entry for it first (P5)")
+    rec = {"time": now_iso(), "tool": tool, "design_lines": n, "design_head": prefix_hash(lines, n),
+           "points": [{"name": p["name"], "conditions": p["conditions"]} for p in pts]}
+    line = json.dumps(rec, ensure_ascii=False, separators=(", ", ": "))
+    with open(wp, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+    return line
+
+
+# ── CLI ─────────────────────────────────────────────────────────
+
+def opts(argv, multi=("--justification",)):
+    o, i = {}, 0
+    while i < len(argv):
+        a = argv[i]
+        if not a.startswith("--") or i + 1 >= len(argv):
+            raise ValueError(a)
+        if a in multi:
+            o.setdefault(a, []).append(argv[i + 1])
+        else:
+            o[a] = argv[i + 1]
+        i += 2
+    return o
+
+
+def main(argv=None, stdin=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] not in ("append", "hook"):
+        print(__doc__)
+        return 1
+    cmd = argv.pop(0)
+    try:
+        o = opts(argv)
+    except ValueError:
+        print(__doc__)
+        return 1
+    if cmd == "append":
+        need = ("--log", "--batch", "--phase", "--points", "--design-method")
+        if any(k not in o for k in need) or set(o) - set(need) - {"--justification"}:
+            print(__doc__)
+            return 1
+        try:
+            line = append_entry(o["--log"], o["--batch"], o["--phase"], read_json_arg(o["--points"]),
+                                o.get("--justification"), o["--design-method"])
+        except (ValueError, OSError) as exc:
+            print(f"design_log: {exc}", file=sys.stderr)
+            return 1
+        print(line)
+        return 0
+    if "--log" not in o or "--witness" not in o or ("--points-key" in o) == ("--points" in o) \
+            or set(o) - {"--log", "--witness", "--points-key", "--points", "--tool"}:
+        print(__doc__)
+        return 1
+    try:
+        if "--points" in o:
+            points, tool = read_json_arg(o["--points"]), o.get("--tool", "")
+        else:
+            payload = json.load(stdin or sys.stdin)
+            points, tool = dig(payload.get("tool_input") or {}, o["--points-key"]), payload.get("tool_name", "")
+        admit(o["--log"], o["--witness"], points, o.get("--tool", tool))
+    except (PermissionError, KeyError, ValueError, OSError) as exc:
+        msg = f"cannot read the conditions at {exc}" if isinstance(exc, KeyError) else str(exc)
+        print(f"design_log hook: call blocked: {msg}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

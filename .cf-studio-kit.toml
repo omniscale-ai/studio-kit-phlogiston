@@ -163,6 +163,25 @@ type = "file"
 user_modifiable = false
 description = "Gate for LITERATURE artifacts: rules L1-L11, offline by default, --resolve online, --plan for mode and exclusions"
 
+# ── design pre-registration scripts (stdlib Python; P5)
+[[kits.resources]]
+id = "design_log"
+kind = "script"
+source = "scripts/design_log.py"
+install_path = "scripts/design_log.py"
+type = "file"
+user_modifiable = false
+description = "Append-only design log for DATASET batches (append) and the pre-call hook that blocks unregistered experiments (hook)"
+
+[[kits.resources]]
+id = "design_gate"
+kind = "script"
+source = "scripts/design_gate.py"
+install_path = "scripts/design_gate.py"
+type = "file"
+user_modifiable = false
+description = "Gate for P5 pre-registration: rules D1-D5 against a non-agent acquisitions source and DATASET section 6"
+
 # ── constraints (keep LAST: the artifact bindings below attach to this resource)
 [[kits.resources]]
 id = "constraints"
