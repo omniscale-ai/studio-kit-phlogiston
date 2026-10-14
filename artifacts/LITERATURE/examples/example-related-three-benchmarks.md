@@ -28,7 +28,7 @@ status: verified
 - Strategy: `related`
 - Anchor: https://doi.org/10.1016/j.ifacol.2017.08.071
 - Bounds: no year bound.
-- Depth: quick
+- Depth: -n 12
 - Output shape: reading list.
 - Cost stated before running: OpenAlex only, ≤ 84 credits.
 - Cost used: 46 OpenAlex credits of the 84 stated: 14 for retrieval (5 requests) and 32 for the online gate's DOI lookups (1 each).
@@ -92,13 +92,13 @@ not used
 
 ## 5. Analysis
 
-Prior work the anchor builds on falls into three sub-problems. Hysteresis modelling: the Bouc–Wen differential model, introduced for random vibration of hysteretic systems [1], surveyed with its identifiability issues [3], is the basis of the anchor's first benchmark. Nonlinear state-space identification: polynomial nonlinear state-space models fitted from a best linear approximation [8] and the maximum-likelihood state-space approach [5] are the methods the anchor's Wiener–Hammerstein benchmark is meant to test. Block-oriented identification: maximum-likelihood Wiener identification [10] and Hammerstein–Wiener identification [7] set the baseline the anchor asks new methods to beat. What the anchor adds is not a method but three measured datasets with stated challenges, so that these methods can be compared on the same records.
+Prior work the anchor builds on falls into three sub-problems. Hysteresis modelling: the Bouc–Wen differential model, introduced for random vibration of hysteretic systems [1] and the subject of a survey [3], is the basis of the anchor's first benchmark. Nonlinear state-space identification: polynomial nonlinear state-space models fitted from a best linear approximation [8] and the maximum-likelihood state-space approach [5] are the methods the anchor's Wiener–Hammerstein benchmark is meant to test. Block-oriented identification: maximum-likelihood Wiener identification [10] and Hammerstein–Wiener identification [7] set the baseline the anchor asks new methods to beat. What the anchor adds is not a method but three measured datasets with stated challenges, so that these methods can be compared on the same records.
 
 ## 6. Claims
 
 | claim | set # | quote | location | status |
 |-------|-------|-------|----------|--------|
-| Bouc–Wen hysteresis has been surveyed with its identification difficulties | 3 | "The Hysteresis Bouc-Wen Model, a Survey" | title | verified |
+| A survey of the Bouc–Wen hysteresis model exists | 3 | "The Hysteresis Bouc-Wen Model, a Survey" | title | verified |
 | PNLSS models are initialised from the best linear approximation | 8 | — | — | assumed |
 
 ## 7. Candidate Hypotheses
@@ -111,8 +111,12 @@ none — the Set is consistent on the anchor's question.
 ## 8. Attestation
 
 - Retrieval: `python3 scripts/lit_run.py related 10.1016/j.ifacol.2017.08.071 --system ctank --out architecture/literature -n 12`, run 2026-10-12; `scripts/lit_run.py` 0.1.0, OpenAlex REST keyless (`https://api.openalex.org`), 5 requests, 14 credits.
+- Retrieval note: run with the source prototype (0.1.0) and without a PLAN file, so the Request lines PLAN, Literature mode and Exclusions checked were written by hand; the Depth line was rewritten to the current form (`-n 12`; the prototype wrote `quick`).
+- Literature mode confirmed by A. Shumilov, 2026-10-12 (PLAN section 11).
 - Set approved by A. Shumilov, 2026-10-12.
 - Hand-over to `cpt-ctank-plan-example` section 2: claim 1 `verified`, claim 2 `assumed`; approved by A. Shumilov, 2026-10-12.
 - Gate, offline: `python3 scripts/lit_gate.py artifacts/LITERATURE/examples/example-related-three-benchmarks.md --plan tests/fixtures/plan-allowed.md`, run 2026-10-14: PASS; structural checks and PLAN checks, no DOI lookups.
 - Gate, online: `python3 scripts/lit_gate.py artifacts/LITERATURE/examples/example-related-three-benchmarks.md --plan tests/fixtures/plan-allowed.md --resolve`, run 2026-10-14: PASS; 32 DOIs looked up in OpenAlex, all resolved; 4 rows `no DOI`.
 - Gate, offline: `python3 scripts/lit_gate.py artifacts/LITERATURE/examples/example-related-three-benchmarks.md --plan tests/fixtures/plan-allowed.md`, run 2026-10-14: PASS; rerun after the status was set to `verified` (L9).
+- Edited after the online gate run (claim 1 narrowed); the offline gate was rerun.
+- Gate, offline: `python3 scripts/lit_gate.py artifacts/LITERATURE/examples/example-related-three-benchmarks.md --plan tests/fixtures/plan-allowed.md`, run 2026-10-14: PASS; rerun after the edit, no DOI lookups.

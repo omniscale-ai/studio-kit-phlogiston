@@ -120,9 +120,10 @@ P10. **A claim is verified before it licenses anything.** Literature and
     PLAN: Prior Knowledge marks `verified` / `assumed`. RUN: Parameter ranges
     row in Assumptions is `verified` or `assumed`, and an assumed range is
     reported as such in the verdict notes. LITERATURE: Claims carry the quote
-    and its location; every DOI is looked up online (`lit_gate.py --resolve`)
+    and its location; every DOI is looked up online (`{lit_gate} --resolve`)
     before the artifact is `verified`; a DOI that does not resolve is marked
-    `unresolved` and its claims are `assumed`.
+    `unresolved`; a row with no DOI is `no DOI`; claims on either are
+    `assumed`.
 
 P11. **Falsified stays falsified.** Hypothesis status is NOT YET TESTED,
     SUPPORTED or FALSIFIED, each with the batch and RUN that set it. A

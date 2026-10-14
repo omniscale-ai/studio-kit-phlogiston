@@ -22,17 +22,21 @@ ALWAYS open and follow `{principles}` WHEN authoring or reviewing any PLAN, DATA
 
 ALWAYS open the kind's `rules.md` and `template.md` from the table above WHEN authoring that kind
 
-ALWAYS run `cfs validate` on every written artifact before presenting it; for a LITERATURE also run `python3 <kit>/scripts/lit_gate.py <file> --plan <PLAN>` once the analysis is written (the draft Set shown at the Set gate is exempt: it fails L2 until approval); run `--resolve` only after the human's go (network, credits); `verified` needs that online PASS with `--plan`; follow `{literature_workflow}` Closing. `<kit>` is the kit root: the directory holding this kit's `.cf-studio-kit.toml`; `cfs resolve-vars` shows it as the parent of `artifacts/` in `{literature_rules}`
+ALWAYS run `cfs validate` on every written artifact before presenting it; for a LITERATURE also run `python3 {lit_gate} <file> --plan <PLAN>` once the analysis is written; the draft Set shown at the Set gate is exempt from both `cfs validate` and the gate; run `--resolve` only after the human's go (network, credits); `verified` needs that online PASS with `--plan`; follow `{literature_workflow}` Closing
 
 ALWAYS follow `{literature_workflow}` WHEN literature is to be searched, cited or put into a PLAN
 
 NEVER search literature WHEN there is no PLAN, its Literature mode is `none`, or the mode is not yet confirmed by the human
 
-NEVER pass `--force` to `lit_run.py` unless the human instructs it for that file
+NEVER run `{lit_run}` before stating the cost and receiving the human's go
+
+NEVER write LITERATURE analysis before the human has approved the Set
+
+NEVER pass `--force` to `{lit_run}` unless the human instructs it for that file
 
 NEVER write an Approved by, Set approved by or Hand-over line the person did not give
 
-ALWAYS pass `--plan` to `lit_run.py` and `lit_gate.py` under `blind`
+ALWAYS pass `--plan` to `{lit_run}` and `{lit_gate}` in every mode (a PLAN file must exist; mode `none` or no PLAN refuses)
 
 NEVER retrieve or cite an item from the PLAN's Excluded table under `blind`
 

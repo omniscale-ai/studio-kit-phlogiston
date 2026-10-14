@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Gate for LITERATURE artifacts. Stdlib only. Exit 0 PASS, 1 FAIL, 2 usage.
+"""Gate for LITERATURE artifacts. Stdlib only.
+Exit 0 PASS, 1 FAIL, 2 usage error, 3 could not complete (network failure
+after retries, HTTP 429/5xx, transport error, unreadable file).
 
     python3 scripts/lit_gate.py <file>.md [--plan <PLAN.md>] [--resolve]
 
@@ -12,7 +14,10 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import http.client
+import io
 import json
+import os
 import re
 import shlex
 import sys
@@ -23,8 +28,8 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lit_common import (DASHES, hit_index, load_plan, norm_doi, section, strip_cf, strip_md,  # noqa: E402
-                        strip_noncontent, table_rows, without_first_table)
+from lit_common import (DASHES, col_index, hit_index, load_plan, norm_doi, prose_of, section,  # noqa: E402
+                        strip_cf, strip_md, strip_noncontent, table_list, table_rows, without_first_table)
 
 STRATEGIES = ("related", "review", "metareview", "scout")
 PLACEHOLDER = re.compile(r"^\s*\{", re.M)
@@ -47,6 +52,9 @@ def openalex_resolver(doi: str):
     for attempt in range(len(BACKOFF) + 1):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "studio-kit lit_gate"})
+            key = os.environ.get("OPENALEX_API_KEY")
+            if key:
+                req.add_header("Authorization", f"Bearer {key}")
             with urllib.request.urlopen(req, timeout=30) as r:
                 d = json.load(r)
             break
@@ -56,7 +64,7 @@ def openalex_resolver(doi: str):
             err = f"HTTP {e.code}"
             if not (e.code == 429 or e.code >= 500):
                 raise ResolverError(f"OpenAlex answered {err} for {doi}") from e
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, http.client.HTTPException) as e:
             err = f"{type(e).__name__}: {e}"
         if attempt < len(BACKOFF):
             time.sleep(BACKOFF[attempt])
@@ -87,7 +95,17 @@ def approval_ok(s: str) -> bool:
     if not m or not valid_date(m.group(0)):
         return False
     name = s.replace(m.group(0), "")
+    bare = re.sub(r"[^a-z ]", "", name.lower()).strip()
+    if bare in ("person", "name", "your name", "yyyy mm dd") or re.search(r"<[^>]*>", name):
+        return False
     return len(re.findall(r"[^\W\d_]", name)) >= 2
+
+
+def approval_who(s: str) -> tuple:
+    """(person letters, date) of an approval string, for comparing two of them."""
+    m = re.search(DATE, s)
+    name = s.replace(m.group(0), "") if m else s
+    return "".join(re.findall(r"[^\W\d_]", name.lower())), (m.group(0) if m else "")
 
 
 def no_braces(s: str) -> str:
@@ -190,6 +208,11 @@ def without_first_table_lines(stripped: str) -> list:
     return out
 
 
+def passage_empty(pas: str) -> bool:
+    pas = strip_cf(pas).strip()
+    return not any(c.isalnum() for c in pas) or pas.lower() in ("none", "tbd", "null", "n/a")
+
+
 def check(path, plan_path=None, do_resolve=False, resolver=None) -> list:
     path = Path(path)
     text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
@@ -234,6 +257,8 @@ def check(path, plan_path=None, do_resolve=False, resolver=None) -> list:
         am = re.search(r"Set approved by\s+(.*)", att)
         if not am or not approval_ok(am.group(1)):
             bad("L2", "Attestation has no `Set approved by <person>, <date>` line")
+        elif appr and approval_ok(appr.group(1)) and approval_who(appr.group(1)) != approval_who(am.group(1)):
+            bad("L2", "section 3 `Approved by` and the Attestation `Set approved by` do not name the same person and date")
 
     # L3
     rows = table_rows(setsec, first_only=True)
@@ -242,12 +267,21 @@ def check(path, plan_path=None, do_resolve=False, resolver=None) -> list:
         bad("L3", "the Set table is empty")
     resolved_of, records = {}, {}
     unresolved_rows = []
+    setnos = set()
     for r in rows:
+        n0 = r[0].strip() if r else ""
+        if re.fullmatch(r"[0-9]+", n0) and int(n0) > 0:
+            if int(n0) in setnos:
+                bad("L3", f"Set row number {n0} appears more than once in the `#` column")
+            setnos.add(int(n0))
+        else:
+            bad("L3", f"Set row number {n0!r} is not a positive integer")
         if len(r) != 8:
             bad("L3", f"Set row {r[0] if r else '?'} has {len(r)} cells; exactly 8 are required")
             continue
         no, doi, res = r[0], strip_md(r[1]), strip_md(r[6]).lower()
-        resolved_of[no] = res
+        if n0.isdigit():
+            resolved_of[int(n0)] = res
         if res not in RESOLVED:
             bad("L3", f"Set row {no}: resolved cell must be yes, unresolved or no DOI, got {r[6]!r}")
         if doi in DASHES:
@@ -281,29 +315,28 @@ def check(path, plan_path=None, do_resolve=False, resolver=None) -> list:
             bad("L4", f"Claims row {i} status must be verified or assumed, got {r[4]!r}")
             continue
         setno = setno.strip()
-        if setno and (not setno.isdigit() or int(setno) > nset or int(setno) == 0):
-            bad("L4", f"Claims row {i} cites Set row {setno!r}, which does not exist (the Set has {nset})")
+        if setno and not (re.fullmatch(r"[0-9]+", setno) and int(setno) in setnos):
+            bad("L4", f"Claims row {i} cites Set row {setno!r}, which does not exist (the Set rows are {sorted(setnos)})")
         if st == "verified":
             if quote.strip() in DASHES or loc.strip() in DASHES:
                 bad("L4", f"Claims row {i} is `verified` without a quote and a location")
-            if not setno.isdigit():
+            if not re.fullmatch(r"[0-9]+", setno):
                 bad("L4", f"Claims row {i} is `verified` without a Set row")
-            elif resolved_of.get(setno) != "yes":
+            elif resolved_of.get(int(setno)) != "yes":
                 bad("L4", f"Claims row {i} is `verified` but Set row {setno} is not `resolved: yes`; it must be `assumed`")
 
-    # L5
+    # L5: citations are read from prose outside tables and inline code, and from the
+    # `set #` column of tables; passages, quotes and values are never scanned.
     ana = section(text, "Analysis")
     cited = set()
-    for mm in re.finditer(r"\[([^\[\]]*)\]", ana):
-        grp = mm.group(1)
-        if not re.search(r"\d", grp) or ana[mm.end():mm.end() + 1] == "(":
-            continue                                   # no digit, or a Markdown link
+
+    def parse_cites(grp, where):
         for part in re.split(r"[,;]", grp):
             part = part.strip()
             m5 = re.fullmatch(r"(\d+)(?:\s*[\-–]\s*(\d+))?", part)
             if not m5:
                 if part:
-                    bad("L5", f"Analysis has the unparseable citation [{grp}]: a bracket holding a digit must be Set row "
+                    bad("L5", f"Analysis has the unparseable citation [{grp}] in {where}: a bracket holding a digit must be Set row "
                               "numbers separated by `,` or `;`, ranges as `a-b`; write other numbers or years "
                               "outside brackets, as ranges `0 to 1` or in parentheses")
                 continue
@@ -311,7 +344,23 @@ def check(path, plan_path=None, do_resolve=False, resolver=None) -> list:
             if len(nums) == 2 and nums[0] > nums[1]:
                 bad("L5", f"Analysis cites the reversed range {part!r}")
             cited.update(nums)
-    over = sorted(n for n in cited if n > nset or n == 0)
+
+    prose = prose_of(ana)
+    for mm in re.finditer(r"\[([^\[\]]*)\]", prose):
+        grp = mm.group(1)
+        if not re.search(r"\d", grp) or prose[mm.end():mm.end() + 1] == "(":
+            continue                                   # no digit, or a Markdown link
+        parse_cites(grp, "the prose")
+    for head, trows in table_list(ana):
+        ci = col_index(head, "set #")
+        if ci is None:
+            continue
+        for tr in trows:
+            cell = tr[ci].strip() if ci < len(tr) else ""
+            if cell in DASHES:
+                continue
+            parse_cites(cell.strip("[]"), "a `set #` cell")
+    over = sorted(n for n in cited if n not in setnos)
     if over:
         bad("L5", f"Analysis cites Set rows that do not exist: {over}")
     if not ana.strip() or PLACEHOLDER.search(ana):
@@ -340,13 +389,16 @@ def check(path, plan_path=None, do_resolve=False, resolver=None) -> list:
     hyp_ran = any(len(r) >= 2 and strip_md(r[0]).lower().startswith("hypothesis")
                   and ran_state(r[1]) == "yes" for r in srows)
 
-    # L7
+    # L7 (the coverage threshold binds only a `verified` artifact; malformed text and
+    # impossible or mismatching k of N fail for drafts too)
     col = strip_md(no_braces(section(text, "Collection"))).strip()
     kn = re.search(r"(\d+)\s+of\s+(\d+)", col)
     not_used = bool(re.match(r"not used\b", col, re.I))
     if not_used and not kn:
         if hyp_ran:
             bad("L7", "Sources says Hypothesis ran, but Collection says `not used`")
+    elif not_used:
+        bad("L7", "Collection says `not used` but also states a coverage `k of N`")
     elif not kn:
         bad("L7", "Collection is used but coverage is not stated as `k of N`")
     else:
@@ -355,37 +407,51 @@ def check(path, plan_path=None, do_resolve=False, resolver=None) -> list:
             bad("L7", f"Collection coverage {k} of {n} is impossible (k must be <= N, N > 0)")
         elif n != nset:
             bad("L7", f"Collection says N = {n}, but the Set has {nset} rows; N must equal the number of Set rows")
-        elif k < 0.5 * n:
+        elif k < 0.5 * n and status == "verified":
             bad("L7", f"Collection covers {k} of {n} approved papers (< half): the map is of the uploads, not the subject")
 
     # L8
     for r in srows:
         if len(r) >= 2 and ran_state(r[1]) is None:
-            bad("L8", f"source {r[0]}: the ran cell must be yes, no, not configured or skipped, got {r[1]!r}")
+            bad("L8", f"source {r[0]}: the ran cell must be yes, no, not configured or skipped (<reason>; the reason is not gated), got {r[1]!r}")
         elif len(r) >= 3 and ran_state(r[1]) == "yes":
             qs = [q.strip() for q in re.split(r"<br\s*/?>", r[2]) if q.strip() not in DASHES]
             if not qs:
                 bad("L8", f"source {r[0]} ran but records no query")
 
     # L10
+    csv_text = ""
     if strategy == "scout":
         csvp = path.with_suffix(".csv")
         if csvp.exists():
             with open(csvp, newline="", encoding="utf-8-sig") as fh:
-                rd = csv.reader(fh)
-                head = [h.strip().lower() for h in next(rd, [])]
-                if "value" not in head or "passage" not in head:
-                    bad("L10", f"{csvp.name} lacks a `value` or a `passage` column")
-                else:
-                    iv, ip = head.index("value"), head.index("passage")
-                    for i, row in enumerate(rd, 1):
-                        val = row[iv].strip() if iv < len(row) else ""
-                        pas = row[ip].strip() if ip < len(row) else ""
-                        pas = strip_cf(pas).strip()
-                        empty = (not any(c.isalnum() for c in pas)
-                                 or pas.lower() in ("none", "tbd", "null", "n/a"))
-                        if val and empty:
-                            bad("L10", f"{csvp.name} row {i}: value without passage")
+                csv_text = fh.read()
+            rd = csv.reader(io.StringIO(csv_text, newline=""))
+            head = [h.strip().lower() for h in next(rd, [])]
+            if "value" not in head or "passage" not in head:
+                bad("L10", f"{csvp.name} lacks a `value` or a `passage` column")
+            else:
+                iv, ip = head.index("value"), head.index("passage")
+                csv_rows = [row for row in rd if any(c.strip() for c in row)]
+                for i, row in enumerate(csv_rows, 1):
+                    val = row[iv].strip() if iv < len(row) else ""
+                    pas = row[ip].strip() if ip < len(row) else ""
+                    if val and passage_empty(pas):
+                        bad("L10", f"{csvp.name} row {i}: value without passage")
+                stab = [(h, r) for h, r in table_list(ana) if col_index(h, "value") is not None
+                        and col_index(h, "passage") is not None]
+                if not stab:
+                    if status == "verified":
+                        bad("L10", "scout artifact has no scout table (columns `value` and `passage`) in section 5")
+                for h, trs in stab:
+                    tv, tp = col_index(h, "value"), col_index(h, "passage")
+                    for i, row in enumerate(trs, 1):
+                        val = row[tv].strip() if tv < len(row) else ""
+                        pas = row[tp].strip() if tp < len(row) else ""
+                        if val and val not in DASHES and passage_empty(pas):
+                            bad("L10", f"section 5 scout table row {i}: value without passage")
+                    if len(trs) != len(csv_rows):
+                        bad("L10", f"section 5 scout table has {len(trs)} data rows, {csvp.name} has {len(csv_rows)}")
         else:
             bad("L10", "scout artifact has no CSV beside it")
 
@@ -445,6 +511,10 @@ def check(path, plan_path=None, do_resolve=False, resolver=None) -> list:
                 i = hit_index(excl, texts=[chunk], doi_in_text=True)
                 if i is not None:
                     report(f"the raw text of {where}", i)
+            if csv_text:
+                i = hit_index(excl, texts=[csv_text], doi_in_text=True)
+                if i is not None:
+                    report("the scout CSV beside the artifact", i)
             for r in srows:
                 for cell in r[2:3]:
                     for q in re.split(r"<br\s*/?>", cell):
@@ -500,9 +570,9 @@ def main(argv=None, resolver=None) -> int:
         return 2
     try:
         fails = check(files[0], plan, do_resolve, resolver)
-    except (OSError, UnicodeDecodeError, ResolverError) as e:
+    except (OSError, UnicodeDecodeError, ResolverError, http.client.HTTPException) as e:
         print(f"lit_gate: cannot complete the check: {e}", file=sys.stderr)
-        return 2
+        return 3
     for f in fails:
         print(f)
     print("PASS" if not fails else f"FAIL — {len(fails)} violation(s)")

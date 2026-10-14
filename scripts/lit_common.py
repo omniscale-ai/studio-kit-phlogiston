@@ -63,6 +63,37 @@ def table_rows(sec: str, first_only: bool = False) -> list:
     return [r for t in tables for r in t[1:]]
 
 
+def table_list(sec: str) -> list:
+    """Every table of a section as (header cells, data rows); separators dropped."""
+    tables, cur = [], None
+    for line in sec.splitlines():
+        s = line.strip()
+        if s.startswith("|"):
+            if cur is None:
+                cur = []
+                tables.append(cur)
+            if not set(s) <= set("|-: "):
+                cur.append(split_row(s))
+        else:
+            cur = None
+    return [(t[0], t[1:]) for t in tables if t]
+
+
+def col_index(head: list, name: str):
+    """Index of the column whose header (Markdown stripped, case-insensitive) is `name`, else None."""
+    for i, h in enumerate(head):
+        if re.sub(r"\s+", " ", strip_md(h)).strip().lower() == name:
+            return i
+    return None
+
+
+def prose_of(sec: str) -> str:
+    """Section text outside Markdown tables and outside inline code (fences and
+    comments are already removed by `section`)."""
+    txt = "\n".join(ln for ln in sec.splitlines() if not ln.strip().startswith("|"))
+    return re.sub(r"(`+).+?\1", " ", txt, flags=re.S)
+
+
 def without_first_table(sec: str) -> str:
     """The section with the lines of its first table removed."""
     out, state = [], 0          # 0 before, 1 inside, 2 after the first table

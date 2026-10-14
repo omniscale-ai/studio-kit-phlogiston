@@ -12,12 +12,14 @@ artifacts/RUN/rules.md            rules for the agent       (10 rules + principl
 artifacts/COMPARISON/template.md  COMPARISON structure      (candidates on one snapshot: vectors, dominance, selection, open pairs)
 artifacts/COMPARISON/rules.md     rules for the agent       (7 rules + principles map)
 artifacts/LITERATURE/template.md  LITERATURE structure      (one literature request along one of four strategies)
-artifacts/LITERATURE/rules.md     rules for the agent       (11 rules + principles map)
+artifacts/LITERATURE/rules.md     rules for the agent       (12 rules + gate table + principles map)
 artifacts/LITERATURE/examples/    worked example            (Path 1, related work, gate PASS online with --plan)
 workflows/literature.md           literature workflow       (intake, four strategies, human gates)
 scripts/lit_run.py                literature retrieval      (OpenAlex REST, stdlib only; writes the draft LITERATURE)
 scripts/lit_gate.py               LITERATURE gate           (L1–L11; --resolve for DOIs; --resolve and --plan for verified)
-tests/                            literature tests          (gate on the shipped example and a corrupted copy)
+scripts/lit_common.py             shared literature code    (parsing and exclusion matching used by lit_run and lit_gate)
+tests/test_literature.py          literature tests          (gate and retrieval: the shipped example, planted errors, blind exclusions, offline stubs)
+tests/fixtures/                   test PLANs                (PLAN files in modes allowed, blind and none)
 principles.md                     12 cross-cutting invariants, loaded first by every rules.md
 AGENTS.md                         agent quick reference, public rule: lands in the project's generated AGENTS.md
 constraints.toml                  headings + IDs for cfs validate (generated from the templates)
@@ -35,7 +37,7 @@ constraints.toml                  headings + IDs for cfs validate (generated fro
 
 ```bash
 cd <project where Studio is installed>
-cfs kit install --path ./kits/studio-kit-core --install-mode register   # path inside the project root
+cfs kit install --path ./kits/studio-kit-phlogiston --install-mode register   # path inside the project root; the directory name is arbitrary
 cfs validate-kits
 ```
 
@@ -117,19 +119,24 @@ Knowledge, and a human confirms it at PLAN approval; there is no default.
 | `blind` | as `allowed`, plus the PLAN's Excluded table: items (`doi`, `title`, `term`, `benchmark`, `author`) that must not be retrieved or cited because they could reveal the answer; attached materials are checked against the Excluded table by the human at Approval (the gate does not see them) |
 
 Under `blind` an excluded item is matched case-insensitively (LITERATURE
-rule 11): a `doi` item exactly, the other types as a substring. Offline the
-gate compares `doi` items with the DOI cell and the other types with the
-DOI, title and OA link cells of every Set row, with Analysis and Claims, and
-with the Request and the Sources query column (a query that contains an
-excluded item means it was retrieved). Venue and authors are not Set columns
-and are compared only with `--resolve`, against the OpenAlex record of each
-row that has a DOI. An offline PASS under `blind` therefore does not clear
-`author` items; only the online PASS with `--plan` does. A matched paper is
-removed from the Set and counted in Sources, never named.
+rule 11): a `doi` item exactly against a DOI cell and against a DOI embedded
+in an OA link, and as a substring in free text; the other types as a
+substring. The gate matches only when run with `--plan`, which supplies the
+Excluded table. It then scans every cell of every Set row; Analysis, Claims,
+Candidate Hypotheses and the Request; each query of the Sources query
+column, also URL-decoded (a query that contains an excluded item means it
+was retrieved); the H1 title and the frontmatter description; section 3
+outside the Set table; the scout CSV; and the whole raw text of the file,
+HTML comments and code fences included. Venue and authors are not Set
+columns and are compared only with `--resolve`, against the OpenAlex record
+of each row that has a DOI. An offline PASS under `blind` therefore does not
+clear `author` items; only the online PASS with `--plan` does. A matched
+paper is removed from the Set and counted in Sources, never named.
 
 Values found by `scout` stay in the LITERATURE: a table in the artifact plus
-the CSV beside it. They reach a PLAN only as `verified` claims in its
-section 2, where they may license a parameter range or a hypothesis. They
+the CSV beside it. They reach a PLAN only as claims in its section 2: a `verified` claim
+may license a parameter range or a hypothesis; an `assumed` one may
+motivate a diagnostic batch only. They
 never become a DATASET; there is no `literature` origin, and no RUN fits
 them.
 
@@ -139,26 +146,44 @@ The gate:
 python3 scripts/lit_gate.py <file>.md [--plan <PLAN.md>] [--resolve]
 ```
 
-Exit 0 PASS, 1 FAIL, 2 usage; the checks are L1–L11 in the LITERATURE
-rules. On every invocation it refuses an artifact whose `verified` claims
-lack a quote or a location or rest on a row not resolved `yes`, whose
-analysis cites Set rows that do not exist, whose candidate hypotheses cite
-no claim, whose Set approval lacks a person and a date, or whose Hypothesis
-collection holds less than half the approved set. With `--resolve` it looks
-up every DOI in OpenAlex (network). With `--plan` it reads the PLAN's
-Literature mode and Excluded table and fails if the PLAN's mode is `none`,
-if the Request's `PLAN:` ID or Literature mode differs from the PLAN's, or,
-under `blind`, on any excluded hit or if `Exclusions checked` differs from
-the PLAN's Excluded row count; without `--plan` it passes only a Request
-whose Literature mode is exactly `allowed`. `scripts/lit_run.py` refuses to
-overwrite an existing artifact or CSV (exit 2, before any request) unless
-`--force` is given. A LITERATURE becomes `verified` only after a PASS of an online
-invocation that has both `--resolve` and `--plan`; a run without `--plan` is
-a structural check only and never clears blind compliance. The PLAN's
+Exit 0 PASS, 1 FAIL, 2 usage error, 3 could not complete (network or file
+error; no verdict). The checks are L1–L11 in the LITERATURE rules. On every
+invocation it refuses an artifact whose Set rows lack a unique positive
+integer `#`; whose `verified` claims lack a quote or a location or rest on a
+row not resolved `yes`; whose Analysis cites Set rows that do not exist or
+cites none (citations are read from prose outside tables and code; a scout
+table cites by its `set #` column); whose candidate hypotheses cite no
+existing claim or are not NOT YET TESTED; whose Set approval lacks a person
+and a date; whose Sources `ran` cells are outside `yes`, `no`,
+`skipped (<reason>)`, `not configured`; whose scout CSV and scout table
+differ in row count or carry a value without a passage; or, when it is
+`verified`, whose Hypothesis collection holds less than half the approved
+set. With `--resolve` it looks up every DOI in OpenAlex (network). With
+`--plan` it reads the PLAN's Literature mode and Excluded table and fails if
+the PLAN's mode is `none`, if the Request's `PLAN:` ID or Literature mode
+differs from the PLAN's, or, under `blind`, on any excluded hit or if
+`Exclusions checked` differs from the PLAN's Excluded row count; without
+`--plan` it passes only a Request whose Literature mode is exactly
+`allowed`.
+
+A LITERATURE becomes `verified` only after a PASS of an online invocation
+that has both `--resolve` and `--plan`; a run without `--plan` is a
+structural check only and never clears blind compliance. The gate checks
+that such a PASS is attested in the artifact, not that the run happened. Of
+the Attestation it reads only the `Set approved by` line and the
+`Gate, online:` lines; the others, including the line recording who
+confirmed the literature mode, are for the record. The PLAN's
 `LITERATURE drawn on` line is not checked by the gate; the PLAN author keeps
-it complete at Approval. The artifact's Attestation records each
-invocation, offline or online, and its result. `tests/test_literature.py`
-gates the shipped example and a corrupted scratch copy of it.
+it complete at Approval.
+
+`scripts/lit_run.py` writes the mechanical parts of the draft and refuses to
+overwrite an existing artifact or CSV (exit 2, before any request) unless
+`--force` is given. `--since` and `--depth` apply only to `review`; for the
+other strategies `-n` caps the total Set. `Cost stated before running` is
+the agent's estimate; `Cost used` is written by the script for retrieval and
+completed by the agent with the gate's DOI lookups.
+`tests/test_literature.py` gates the shipped example, planted errors in
+scratch copies of it, and the PLAN fixtures in `tests/fixtures/`.
 
 ## Installing the literature sources
 
@@ -171,7 +196,7 @@ What the user must supply:
 
 | source | access | the user supplies |
 |---|---|---|
-| OpenAlex | REST keyless (about 1000 credits a day: search = 10, work = 1); MCP `https://mcp.openalex.org/mcp` | nothing for keyless REST; optionally a free OpenAlex account and key in `OPENALEX_API_KEY` for ten times the budget, or for the MCP, which needs a sign-in through the browser once |
+| OpenAlex | REST keyless (about 1000 credits a day: search = 10, work = 1, group_by = 10; a title search to resolve an anchor 10; the online gate 1 per DOI); MCP `https://mcp.openalex.org/mcp` | nothing for keyless REST; optionally a free OpenAlex account and key in `OPENALEX_API_KEY` for ten times the budget, or for the MCP, which needs a sign-in through the browser once |
 | Consensus | REST `https://api.consensus.app/v1/search` (header `x-api-key`); MCP `https://mcp.consensus.app/mcp` | a Consensus account and a key in `CONSENSUS_API_KEY` (profile menu, API & MCP Dashboard, Keys and clients, New key; shown once); the free plan gives 30 calls a month, shared with its MCP; full-text passages, overage and recurring use need a paid plan |
 | Constructor Hypothesis | MCP `https://constructor.app/api/hypothesis-mcp/streamable-http`, header `X-Model-AccessKey` | a Constructor Hypothesis account; a collection relevant to the run, built (uploads, Zotero or the product's search) and indexed before the workflow runs; an access key in `HYPOTHESIS_MCP_KEY`, renewed every 30 days |
 
@@ -192,5 +217,5 @@ export CONSENSUS_API_KEY=...     # required for any Consensus REST call
 export HYPOTHESIS_MCP_KEY=...    # required for the Hypothesis MCP; renew every 30 days
 ```
 
-The project's CLAUDE.md lists which of the three sources are configured;
-each LITERATURE's Sources section records which ran.
+Each LITERATURE's Sources section records which sources ran; a project may
+list its configured sources in its CLAUDE.md.

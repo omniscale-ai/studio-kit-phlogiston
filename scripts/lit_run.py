@@ -30,6 +30,15 @@ the query; an existing artifact or CSV is never overwritten without --force
 (checked before any request). Exit codes: 0 written, 1 retrieval failed
 (nothing written), 2 refused or usage.
 
+--since and --depth are valid only for `review` (exit 2 before any request
+for another strategy). For the other strategies -n caps the whole Set
+(`related` fills references, citers, related, same-topic in that order after
+removing duplicates, then truncates to n); the Depth line then records `-n <N>`.
+The artifact and its CSV are written to temporary files and renamed, so a
+failure leaves nothing half-written. Section 1 gets `Cost stated before
+running: {the cost as stated to the human and approved}` for the agent to
+fill, and `Cost used:` with the actual retrieval credits.
+
 Why a script: the Set, the queries that produced it, the resolved flags and
 the budget used are facts about a computation. Written by hand they drift
 toward what the author hoped to find.
@@ -40,9 +49,11 @@ import argparse
 import csv
 import datetime as dt
 import hashlib
+import io
 import json
 import os
 import re
+import shlex
 import sys
 import urllib.parse
 import urllib.request
@@ -97,10 +108,10 @@ def search(q: str, n: int, sort: str = "relevance_score:desc", **flt) -> list:
     f = ",".join(f"{k}:{v}" for k, v in flt.items()) or None
     out, page = [], 1
     while len(out) < n:
-        per = min(50, n - len(out))
-        d = get("/works", search=q, filter=f, select=FIELDS, per_page=per, page=page, sort=sort)
+        # a fixed page size keeps the pages disjoint; the surplus is cut at the end
+        d = get("/works", search=q, filter=f, select=FIELDS, per_page=50, page=page, sort=sort)
         out += d["results"]
-        if len(d["results"]) < per:
+        if len(d["results"]) < 50:
             break
         page += 1
     return out[:n]
@@ -155,7 +166,7 @@ def s_related(anchor: str, n: int, excluded=None):
     same = [w for w in search(a["title"], n + 1) if w["id"] != a["id"]]
     items = ([(w, "reference") for w in refs[:n]] + [(w, "citer") for w in cit[:n]]
              + [(w, "related") for w in rel[:n // 2]] + [(w, "same-topic") for w in same[:n // 2]])
-    return dedupe(items), {"anchor": a}
+    return dedupe(items)[:n], {"anchor": a}
 
 
 def s_review(subject: str, n: int, since, deep: bool, excluded=None):
@@ -233,18 +244,18 @@ def s_metareview(subject: str, n: int):
               if any(k in (w.get("title") or "").lower() for k in REVIEW_WORDS)]
     rows = dedupe([(w, "review") for w in typed + titled])
     rows.sort(key=lambda r: -(r[0].get("cited_by_count") or 0))
-    return rows, {"topics": topics}
+    return rows[:n], {"topics": topics}
 
 
 def s_scout(subject: str, n: int):
-    ws = search(subject, n)
+    ws = [w for w, _ in dedupe([(w, "") for w in search(subject, n)])]
     scored = []
     for w in ws:
         a = abstract(w).lower()
         hits = [k for k in MEASURE_WORDS if k in a]
         scored.append((w, hits))
     scored.sort(key=lambda x: (-len(x[1]), -(x[0].get("publication_year") or 0)))
-    return [(w, f"candidate ({len(h)} signals)") for w, h in scored], {}
+    return [(w, f"candidate ({len(h)} signals)") for w, h in scored][:n], {}
 
 
 # ---------------------------------------------------------------------------
@@ -252,11 +263,14 @@ def s_scout(subject: str, n: int):
 # ---------------------------------------------------------------------------
 
 def work_fields(w: dict) -> tuple:
-    """(dois, texts) of a retrieved work: DOI, title, OA link, authors, venue."""
+    """(dois, texts) of a retrieved work: DOI, title, OA link, venue, authors,
+    institution names and topic names (the screened fields)."""
     doi = norm_doi(w.get("doi") or "")
     src = ((w.get("primary_location") or {}).get("source") or {})
     authors = [(x.get("author") or {}).get("display_name") or "" for x in (w.get("authorships") or [])]
-    return [doi], [doi, w.get("title") or "", oa(w), src.get("display_name") or ""] + authors
+    insts = [i.get("display_name") or "" for x in (w.get("authorships") or []) for i in (x.get("institutions") or [])]
+    topics = [t.get("display_name") or "" for t in ([w.get("primary_topic") or {}] + list(w.get("topics") or []))]
+    return [doi], [doi, w.get("title") or "", oa(w), src.get("display_name") or ""] + authors + insts + topics
 
 
 def apply_exclusion(rows: list, excluded: list) -> tuple:
@@ -336,7 +350,7 @@ PLACEHOLDER = {
     "related": "{Path 1: group the references by the sub-problem they address; for each, what was established, by whom, with which method, and what the anchor adds. Every assertion cites a Set row in brackets; the anchor is named without a row.}",
     "review": "{Path 2: one block per group (authors, institutions, approach, data, years active, achievements in the Set's own terms, assessment succeeding / stalled / too early with cited evidence), then the cross-group observations: agreement, contradiction, gaining and abandoned approaches by year. Start from the Groups table in section 3; merge or split groups and say why.}",
     "metareview": "{Path 3: per review its scope, period, trends asserted and gaps named; then trends asserted by several reviews, trends contradicted between reviews, what no review covers. No primary-source claim; a claim that needs one is listed as a candidate for Path 1 or 2.}",
-    "scout": "{Path 4: the scout table from the CSV beside this artifact, one row per measurement: paper | doi | link | what_measured | how_measured | constraints (in the paper's words) | value | unit | passage. No passage, no value. Units as printed. Values are claims, never a DATASET.}",
+    "scout": "{Path 4: the scout table from the CSV beside this artifact, one row per measurement: set # | paper | doi | link | what_measured | how_measured | constraints (in the paper's words) | value | unit | passage. No passage, no value. Units as printed. Values are claims, never a DATASET.}",
 }
 
 
@@ -354,14 +368,8 @@ def write_artifact(strategy, query, system, rows, extra, args, out_dir: Path, pl
         sec3_extra = (f"\n\n**Landscape** ({landscape}):\n\n"
                       + counts_block(extra["counts"]) + "\n\n**Groups** (by output in the Set; co-authorship suggests the grouping, the human confirms it):\n\n"
                       + groups_table(extra["groups"]))
+    csv_path = out.with_suffix(".csv")
     if strategy == "scout":
-        csv_path = out.with_suffix(".csv")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        with open(csv_path, "w", newline="", encoding="utf-8") as fh:
-            wr = csv.writer(fh)
-            wr.writerow(["set_no", "paper", "doi", "link", "what_measured", "how_measured", "constraints", "value", "unit", "passage"])
-            for i, (w, _) in enumerate(rows, 1):
-                wr.writerow([i, w.get("title"), (w.get("doi") or "").replace("https://doi.org/", ""), oa(w), "", "", "", "", args.unit or "", ""])
         sec3_extra = f"\n\nExtraction skeleton written to `{csv_path.name}` (one row per paper; add rows per measurement)."
     if plan:
         blind = plan["mode"] == "blind"
@@ -375,10 +383,12 @@ def write_artifact(strategy, query, system, rows, extra, args, out_dir: Path, pl
                       "- Exclusions checked: {number of rows of the PLAN's Excluded table under `blind`; `not applicable` under `allowed`}\n")
         removed_line = "- Removed by exclusion: {under `blind` the count only; `not applicable` under `allowed`}\n"
     anchor_line = ("Anchor: " + (anchor.get("doi") or anchor["id"])) if anchor else "Subject: " + query
-    bounds = (f"since {args.since}" if args.since else "no year bound") + (
+    bounds = (f"since {args.since}" if strategy == "review" and args.since else "no year bound") + (
         f"; quantity {args.quantity} [{args.unit or '?'}]" if strategy == "scout" else "") + "."
     key = "keyed" if os.environ.get("OPENALEX_API_KEY") else "keyless"
-    cmd = " ".join(argv if argv is not None else sys.argv)
+    toks = [t.replace("`", "'").replace("\n", " ") for t in (argv if argv is not None else sys.argv)]
+    cmd = shlex.join(["python3"] + toks)
+    depth_line = args.depth if strategy == "review" else f"-n {args.n}"
     openalex_rows = "\n".join(
         f"| OpenAlex | yes | {q.replace('|', chr(92) + '|')} | " + (f"{budget['credits']} credits | {len(budget['queries'])} requests; {key}" if k == 0
                                                        else f"— | request {k + 1} of {len(queries)} distinct") + " |"
@@ -401,9 +411,9 @@ status: draft
 {plan_lines}- Strategy: `{strategy}`
 - {anchor_line}
 - Bounds: {bounds}
-- Depth: {args.depth}
+- Depth: {depth_line}
 - Output shape: {args.output}.
-- Cost stated before running: OpenAlex only, ≤ {args.n * 2 + 60} credits.
+- Cost stated before running: {{the cost as stated to the human and approved}}
 - Cost used: {budget['credits']} OpenAlex credits for retrieval ({len(budget['queries'])} requests; {budget['remaining']} remaining today); the online gate's DOI lookups are added when it runs.
 
 ## 2. Sources
@@ -446,7 +456,33 @@ not used
 - Retrieval: `{cmd}`, run {today}; `scripts/lit_run.py` {VERSION}, OpenAlex REST {key} (`{BASE}`), {len(budget['queries'])} requests, {budget['credits']} credits.
 """
     out_dir.mkdir(parents=True, exist_ok=True)
-    out.write_text(doc, encoding="utf-8")
+    finals = [(out, doc)]
+    if strategy == "scout":
+        buf = io.StringIO(newline="")
+        wr = csv.writer(buf)
+        wr.writerow(["set_no", "paper", "doi", "link", "what_measured", "how_measured", "constraints", "value", "unit", "passage"])
+        for i, (w, _) in enumerate(rows, 1):
+            wr.writerow([i, w.get("title"), (w.get("doi") or "").replace("https://doi.org/", ""), oa(w), "", "", "", "", args.unit or "", ""])
+        finals.append((csv_path, buf.getvalue()))
+    tmps, created = [], []
+    try:
+        for dest, content in finals:
+            tmp = dest.with_name(dest.name + ".tmp")
+            tmps.append(tmp)
+            with open(tmp, "w", newline="", encoding="utf-8") as fh:
+                fh.write(content)
+        for (dest, _), tmp in zip(finals, tmps):
+            existed = dest.exists()
+            os.replace(tmp, dest)
+            if not existed:
+                created.append(dest)
+    except BaseException:
+        for t in tmps + created:      # nothing half-written is left behind
+            try:
+                t.unlink()
+            except OSError:
+                pass
+        raise
     return out
 
 
@@ -457,14 +493,23 @@ def main(argv=None):
     ap.add_argument("--system", required=True)
     ap.add_argument("--out", default="architecture/literature")
     ap.add_argument("--plan", help="PLAN.md: reads Literature mode and the Excluded table")
-    ap.add_argument("-n", type=int, default=None, help="set size target (default by depth)")
-    ap.add_argument("--since", type=int)
-    ap.add_argument("--depth", choices=["quick", "deep"], default="quick")
+    ap.add_argument("-n", type=int, default=None, help="non-review: cap on the total Set; review: search size per query, not recorded in Depth (default by depth)")
+    ap.add_argument("--since", type=int, help="review only: earliest publication year")
+    ap.add_argument("--depth", choices=["quick", "deep"], default=None, help="review only (default quick)")
     ap.add_argument("--quantity", default="")
     ap.add_argument("--unit", default="")
     ap.add_argument("--output", default="reading list")
     ap.add_argument("--force", action="store_true", help="overwrite an existing artifact and CSV")
     a = ap.parse_args(argv)
+    if a.strategy != "review":
+        for flag, val in (("--since", a.since), ("--depth", a.depth)):
+            if val is not None:
+                print(f"lit_run: refused: {flag} is valid only for `review`; for {a.strategy} use -n to cap the Set", file=sys.stderr)
+                return 2
+    if a.n is not None and a.n < 1:
+        print("lit_run: refused: -n must be a positive integer", file=sys.stderr)
+        return 2
+    a.depth = a.depth or "quick"
     plan = None
     if a.plan is not None:
         if not Path(a.plan).is_file():
@@ -509,7 +554,7 @@ def main(argv=None):
         return 1
     try:
         path = write_artifact(a.strategy, a.query, a.system, rows, extra, a, Path(a.out), plan, removed,
-                              argv=None if argv is None else ["lit_run.py"] + list(argv))
+                              argv=sys.argv if argv is None else ["lit_run.py"] + list(argv))
     except OSError as e:
         print(f"lit_run: cannot write the artifact: {e}", file=sys.stderr)
         return 1

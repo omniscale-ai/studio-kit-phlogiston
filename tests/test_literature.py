@@ -8,6 +8,7 @@ Network tests (real lit_run retrieval) run only with LIT_ONLINE=1.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import io
 import os
 import subprocess
@@ -143,9 +144,12 @@ class TestPlantedErrors(Scratch):
     def test_low_collection_coverage_fails_l7(self):
         t = example_text().replace("## 4. Collection\n\nnot used",
                                    "## 4. Collection\n\nCollection `c-1` holds 5 of 36 approved papers.")
-        rc, out = gate(self.lit(t))
+        self.assertEqual(gate(self.lit(t))[0], 0)            # S7: a draft is not held to the threshold
+        v = t.replace("status: draft", "status: verified").rstrip("\n") + "\n- " + ONLINE + "\n"
+        rc, out = gate(self.lit(v), ALLOWED)
         self.assertEqual(rc, 1)
-        self.assertFires(out, "L7")
+        self.assertFires(out, "L7", "L9")
+        self.assertIn("< half", out)
 
     def test_half_coverage_passes_l7(self):
         t = example_text().replace("## 4. Collection\n\nnot used",
@@ -309,26 +313,26 @@ class TestL11(Scratch):
         t = blind_text(1).replace("What the anchor adds is not a method", "A Zyxwvut Quillfeather note: what the anchor adds is not a method")
         rc, out = gate(self.lit(t), self.plan())
         self.assertEqual(rc, 1)
-        self.assertIn("Analysis", out)
+        self.assertIn("excluded hit in Analysis (PLAN Excluded row 1)", out)       # the dedicated scan, not the raw-text one
 
     def test_hit_in_claims(self):
         t = blind_text(1).replace("\"The Hysteresis Bouc-Wen Model, a Survey\"", "\"Zyxwvut Quillfeather survey\"")
         rc, out = gate(self.lit(t), self.plan())
         self.assertEqual(rc, 1)
-        self.assertIn("Claims", out)
+        self.assertIn("excluded hit in Claims (PLAN Excluded row 1)", out)
 
     def test_hit_in_request(self):
         t = blind_text(1).replace("- Output shape: reading list.", "- Output shape: reading list on Zyxwvut Quillfeather.")
         rc, out = gate(self.lit(t), self.plan())
         self.assertEqual(rc, 1)
-        self.assertIn("Request", out)
+        self.assertIn("excluded hit in Request (PLAN Excluded row 1)", out)
 
     def test_hit_in_sources_query_decoded(self):
         t = blind_text(1)
         t = t.replace("?select=id%2Cdoi", "?search=Zyxwvut%20Quillfeather&select=id%2Cdoi", 1)
         rc, out = gate(self.lit(t), self.plan())
         self.assertEqual(rc, 1)
-        self.assertIn("Sources query", out)
+        self.assertIn("excluded hit in Sources query of OpenAlex (PLAN Excluded row 1)", out)
 
     def test_doi_item_in_query_substring(self):
         rc, out = self.hit("10.1016/j.ifacol.2017.08.071", "doi")
@@ -958,7 +962,7 @@ class TestResolverErrors(Scratch):
         err = io.StringIO()
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(err):
             rc = lit_gate.main([str(p), "--resolve"], resolver=boom)
-        self.assertEqual(rc, 2)
+        self.assertEqual(rc, 3)
         self.assertNotIn("unresolved", out.getvalue() + err.getvalue())
         self.assertIn("503", err.getvalue())
 
@@ -977,7 +981,7 @@ class TestResolverErrors(Scratch):
         bad.write_bytes(b"---\nstatus: draft\n---\n\xff\xfe\x80")
         err = io.StringIO()
         with redirect_stdout(io.StringIO()), redirect_stderr(err):
-            self.assertEqual(lit_gate.main([str(bad)]), 2)
+            self.assertEqual(lit_gate.main([str(bad)]), 3)
         self.assertIn("lit_gate", err.getvalue())
         self.assertEqual(subprocess.run([sys.executable, str(GATE), str(p), "--plan", ""], capture_output=True).returncode, 2)
 
@@ -1136,6 +1140,313 @@ class TestLitRunFindings(Scratch):
         lit_run.budget["queries"] = []
 
 
+class TestReview3(Scratch):
+    """Regression tests of the third review (K-001 ... K-014)."""
+    base = ("--system", "t")
+    X = "Zyxwvut Quillfeather"
+
+    def ana(self, text, add):
+        return text.replace("## 5. Analysis\n\n", "## 5. Analysis\n\n" + add + "\n\n", 1)
+
+    # ---- K-001
+    def test_k001_set_numbers_unique_positive_not_contiguous(self):
+        ex = example_text()
+        t = ex.replace("\n| 36 |", "\n| 40 |", 1)
+        self.assertEqual(chk(t), "")                                        # a gap is allowed
+        self.assertEqual(chk(self.ana(t, "A later paper [40].")), "")
+        self.assertIn("[L5]", chk(self.ana(t, "A paper [36].")))             # 36 no longer exists
+        claim = "| 8 | — | — | assumed |"
+        self.assertEqual(chk(t.replace(claim, "| 40 | — | — | assumed |")), "")
+        self.assertIn("[L4]", chk(t.replace(claim, "| 36 | — | — | assumed |")))
+        self.assertIn("[L3]", chk(ex.replace("\n| 36 |", "\n| 35 |", 1)))        # duplicate
+        self.assertIn("[L3]", chk(ex.replace("\n| 36 |", "\n| x |", 1)))          # not an integer
+        self.assertIn("[L3]", chk(ex.replace("\n| 36 |", "\n| 0 |", 1)))
+        # L7 N is the number of Set rows, not the largest number
+        col = lambda c: t.replace("## 4. Collection\n\nnot used", f"## 4. Collection\n\n{c}")
+        self.assertNotIn("[L7]", chk(col("holds 36 of 36 papers")))
+        self.assertIn("[L7]", chk(col("holds 36 of 40 papers")))
+
+    # ---- K-002
+    def test_k002_citations_read_from_prose_and_set_column_only(self):
+        ex = example_text()
+        sc = ex.replace("- Strategy: `related`", "- Strategy: `scout`")
+        tab = ("| paper | doi | passage | value | set # |\n|---|---|---|---|---|\n"
+               "| P | d | slope (see [12]) and [3,4] with CI [0.2, 0.9] | 1 | 3 |\n")
+        self.assertEqual(chk(self.ana(ex, tab)), "")
+        self.assertEqual(chk(self.ana(ex, "Code `x[99]` is not a citation.\n\n```\n[99]\n```")), "")
+        self.assertIn("[L5]", chk(self.ana(ex, "Prose cites [99]. " + tab)))
+        bad = tab.replace("| 1 | 3 |", "| 1 | 99 |")
+        out = chk(self.ana(ex, bad))
+        self.assertIn("[L5]", out)
+        self.assertIn("99", out)
+        self.assertIn("[L5]", chk(self.ana(ex, tab.replace("| 1 | 3 |", "| 1 | 0 |"))))
+        self.assertEqual(chk(self.ana(ex, tab.replace("| 1 | 3 |", "| 1 | 1; 2-3 |"))), "")
+        self.assertIn("scout", sc)
+
+    # ---- K-003 / X-001
+    def test_k003_since_and_depth_only_for_review(self):
+        for strat, flag in (("related", "--since"), ("metareview", "--depth"), ("scout", "--since"), ("scout", "--depth")):
+            f = FakeGet(works=[fake_work(1, "10.1/a", "T")], anchor=fake_work(100, "10.5/a", "A"))
+            val = "2015" if flag == "--since" else "deep"
+            out = self.td / ("o" + strat + flag)
+            rc, msg = run_main([strat, "q", *self.base, flag, val, "--out", str(out)], f)
+            self.assertEqual(rc, 2, msg)
+            self.assertIn("only for `review`", msg)
+            self.assertEqual(f.calls, [])
+            self.assertFalse(out.exists())
+        out = self.td / "rv"
+        rc, msg = run_main(["review", "q", *self.base, "--since", "2015", "--out", str(out)], FakeGet(works=[fake_work(1, "10.1/a", "T")]))
+        self.assertEqual(rc, 0, msg)
+        text = next(out.glob("*.md")).read_text(encoding="utf-8")
+        self.assertIn("- Bounds: since 2015.", text)
+        self.assertIn("- Depth: quick", text)
+
+    def test_k003_n_caps_the_total_set_and_request_lines(self):
+        works = [fake_work(i, f"10.1/{i}", f"Paper {i}") for i in range(1, 11)]
+        for strat in ("metareview", "scout", "related"):
+            out = self.td / strat
+            f = FakeGet(works=works, anchor=fake_work(100, "10.5/anchor", "Neutral anchor title"))
+            q = "10.5/anchor" if strat == "related" else "q"
+            rc, msg = run_main([strat, q, *self.base, "-n", "4", "--out", str(out)], f)
+            self.assertEqual(rc, 0, msg)
+            text = next(out.glob("*.md")).read_text(encoding="utf-8")
+            rows = lit_common.table_rows(lit_common.section(text, "Set"), first_only=True)
+            self.assertEqual(len(rows), 4, strat)
+            self.assertIn("- Depth: -n 4", text)
+            self.assertIn("- Bounds: no year bound", text)
+        # related fills in priority order: references first
+        a = fake_work(100, "10.5/anchor", "Neutral anchor title")
+        a["referenced_works"] = [f"https://openalex.org/W{i}" for i in (1, 2)]
+        rc, _ = run_main(["related", "10.5/anchor", *self.base, "-n", "3", "--out", str(self.td / "pr")],
+                         FakeGet(works=works, anchor=a))
+        text = next((self.td / "pr").glob("*.md")).read_text(encoding="utf-8")
+        roles = [r[4] for r in lit_common.table_rows(lit_common.section(text, "Set"), first_only=True)]
+        self.assertEqual(roles[:2], ["reference", "reference"])
+        self.assertEqual(len(roles), 3)
+
+    # ---- K-004
+    def test_k004_search_uses_fixed_page_size(self):
+        works = [fake_work(i, f"10.1/{i}", f"P{i}") for i in range(1, 51)]
+        f = FakeGet(works=works)
+        with mock.patch.object(lit_run, "get", f):
+            got = lit_run.search("q", 60)
+        self.assertEqual({kw["per_page"] for _, kw in f.calls}, {50})
+        self.assertEqual([kw["page"] for _, kw in f.calls], [1, 2])
+        self.assertEqual(len(got), 60)                                      # the stub serves 50 per page
+        f = FakeGet(works=works)
+        with mock.patch.object(lit_run, "get", f):
+            self.assertEqual(len(lit_run.search("q", 7)), 7)
+        self.assertEqual([kw["per_page"] for _, kw in f.calls], [50])
+        f = FakeGet(works=works)
+        rc, msg = run_main(["scout", "q", *self.base, "-n", "60", "--out", str(self.td / "o")], f)
+        self.assertEqual(rc, 0, msg)
+        text = next((self.td / "o").glob("*.md")).read_text(encoding="utf-8")
+        self.assertEqual(len(lit_common.table_rows(lit_common.section(text, "Set"), first_only=True)), 50)   # deduped
+
+    # ---- K-005
+    def test_k005_blind_screens_institutions_and_topics(self):
+        for field, item, mut in (
+                ("institution", "Quillfeather Institute",
+                 lambda w: w["authorships"][0].update(institutions=[{"display_name": "Quillfeather Institute"}])),
+                ("topic", "Secret Topic Name", lambda w: w.update(topics=[{"display_name": "Secret Topic Name"}]))):
+            works = [fake_work(1, "10.1/a", "Plain paper"), fake_work(2, "10.1/b", "Other paper", authors=("Fine Person",))]
+            mut(works[1])
+            out = self.td / field
+            pl = self.plan(rows=((item, "term"),))
+            rc, msg = run_main(["review", "subject words", *self.base, "--plan", str(pl), "--out", str(out)], FakeGet(works=works))
+            self.assertEqual(rc, 0, msg)
+            md = next(out.glob("*.md"))
+            text = md.read_text(encoding="utf-8")
+            self.assertIn("- Removed by exclusion: 1", text, field)
+            self.assertNotIn(item, text)
+            self.assertNotIn("Other paper", text)
+            self.assertNotIn("excluded hit", "\n".join(lit_gate.check(md, pl)), field)
+            self.assertNotIn("[L11]", "\n".join(lit_gate.check(md, pl)), field)
+
+    # ---- K-006
+    def test_k006_retrieval_line_is_shell_quoted_without_backticks(self):
+        import shlex
+        out = self.td / "o"
+        rc, msg = run_main(["metareview", "a `b` c; $(x)", *self.base, "--out", str(out)], FakeGet(works=[fake_work(1, "10.1/a", "T")]))
+        self.assertEqual(rc, 0, msg)
+        text = next(out.glob("*.md")).read_text(encoding="utf-8")
+        line = [ln for ln in text.splitlines() if ln.startswith("- Retrieval: `")][0]
+        cmd = line[len("- Retrieval: `"):line.index("`, run ")]
+        self.assertNotIn("`", cmd)
+        toks = shlex.split(cmd)
+        self.assertEqual(toks[:3], ["python3", "lit_run.py", "metareview"])
+        self.assertEqual(toks[3], "a 'b' c; $(x)")
+
+    # ---- K-008
+    def test_k008_l7_threshold_only_when_verified(self):
+        ex = example_text()
+        col = lambda c: ex.replace("## 4. Collection\n\nnot used", f"## 4. Collection\n\n{c}")
+        self.assertNotIn("[L7]", chk(col("holds 5 of 36 papers")))              # draft, low coverage
+        for bad in ("holds 40 of 36 papers", "holds 30 of 40 papers", "{k of N}", "it was uploaded"):
+            self.assertIn("[L7]", chk(col(bad)), bad)                           # drafts still fail these
+        v = col("holds 5 of 36 papers").replace("status: draft", "status: verified")
+        self.assertIn("< half", chk(v))
+
+    # ---- K-009
+    def test_k009_exit_3_and_bearer_header(self):
+        p = self.lit(example_text())
+        for exc in (lit_gate.ResolverError("x"), http.client.IncompleteRead(b""), http.client.BadStatusLine("x")):
+            def boom(doi, exc=exc):
+                raise exc
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(lit_gate.main([str(p), "--resolve"], resolver=boom), 3, repr(exc))
+        with mock.patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(lit_gate.main([str(p)]), 3)
+        m = mock.Mock(side_effect=http.client.BadStatusLine("x"))
+        with mock.patch("urllib.request.urlopen", m), mock.patch("time.sleep"):
+            with self.assertRaises(lit_gate.ResolverError):
+                lit_gate.openalex_resolver("10.1/x")
+        self.assertEqual(m.call_count, 3)
+        for env, expect in (({"OPENALEX_API_KEY": "k123"}, "Bearer k123"), ({}, None)):
+            seen = []
+            resp = mock.MagicMock()
+            resp.__enter__.return_value = io.BytesIO(b'{"id": "W1", "authorships": []}')
+            with mock.patch.dict(os.environ, env), mock.patch("urllib.request.urlopen",
+                                                                 side_effect=lambda r, timeout=0: seen.append(r) or resp):
+                if not env:
+                    os.environ.pop("OPENALEX_API_KEY", None)
+                lit_gate.openalex_resolver("10.1/x")
+            self.assertEqual(seen[0].get_header("Authorization"), expect)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(lit_gate.main([str(p), "--bogus"]), 2)
+        self.assertIn("3", lit_gate.__doc__)
+
+    # ---- K-012
+    def scout_case(self, table_rows, csv_rows):
+        t = example_text().replace("- Strategy: `related`", "- Strategy: `scout`")
+        head = "| paper | doi | link | what_measured | how_measured | constraints | value | unit | passage |\n|---|---|---|---|---|---|---|---|---|\n"
+        t = self.ana(t, head + "".join(f"| P | d | l | w | h | c | {v} | s | {p} |\n" for v, p in table_rows))
+        p = self.lit(t, "scout.md")
+        (self.td / "scout.csv").write_text("set_no,paper,doi,link,what_measured,how_measured,constraints,value,unit,passage\n"
+                                           + "".join(f"1,P,d,,w,h,c,{v},s,{q}\n" for v, q in csv_rows), encoding="utf-8")
+        return p
+
+    def test_k012_scout_table_checked_against_csv(self):
+        ok = [("3.2", "it was 3.2 s")]
+        self.assertEqual(lit_gate.check(self.scout_case(ok, ok), ALLOWED), [])
+        out = "\n".join(lit_gate.check(self.scout_case(ok + ok, ok), ALLOWED))
+        self.assertIn("[L10]", out)
+        self.assertIn("2 data rows", out)
+        out = "\n".join(lit_gate.check(self.scout_case([("3.2", "—")], ok), ALLOWED))
+        self.assertIn("section 5 scout table row 1: value without passage", out)
+        # the table, not only the CSV, is read: an empty-valued CSV with a valued table row still fails
+        out = "\n".join(lit_gate.check(self.scout_case([("3.2", "")], [("", "")]), ALLOWED))
+        self.assertIn("value without passage", out)
+
+    def test_k012_blind_scans_the_csv(self):
+        p = self.scout_case([("", "")], [("", "")])
+        t = p.read_text(encoding="utf-8").replace("- Literature mode: `allowed`, copied", "- Literature mode: `blind`, copied") \
+            .replace("- Exclusions checked: not applicable.", "- Exclusions checked: 1") \
+            .replace("- Removed by exclusion: not applicable.", "- Removed by exclusion: 0")
+        p.write_text(t, encoding="utf-8")
+        pl = self.plan()
+        self.assertEqual(lit_gate.check(p, pl), [])
+        (self.td / "scout.csv").write_text("set_no,paper,value,passage\n1,Zyxwvut Quillfeather study,,\n", encoding="utf-8")
+        out = "\n".join(lit_gate.check(p, pl))
+        self.assertIn("excluded hit in the scout CSV", out)
+        self.assertNotIn("Quillfeather", out)
+
+    # ---- K-013
+    def test_k013_failed_write_leaves_nothing(self):
+        import argparse
+        a = argparse.Namespace(since=None, quantity="q", unit="s", depth="quick", output="table", n=20)
+        works = [(fake_work(1, "10.1/a", "T"), "candidate")]
+        real = os.replace
+        calls = []
+
+        def flaky(src, dst):
+            calls.append(dst)
+            if len(calls) == 2:
+                raise OSError("disk full")
+            return real(src, dst)
+        out = self.td / "o"
+        with mock.patch.object(lit_run.os, "replace", flaky):
+            with self.assertRaises(OSError):
+                lit_run.write_artifact("scout", "q", "t", works, {}, a, out, None, 0)
+        self.assertEqual(list(out.iterdir()), [])
+        with mock.patch("builtins.open", side_effect=OSError("nope")):
+            with self.assertRaises(OSError):
+                lit_run.write_artifact("scout", "q", "t", works, {}, a, self.td / "o2", None, 0)
+        self.assertEqual([p for p in (self.td / "o2").glob("*")], [])
+        lit_run.write_artifact("scout", "q", "t", works, {}, a, self.td / "o3", None, 0)
+        self.assertEqual(sorted(p.suffix for p in (self.td / "o3").iterdir()), [".csv", ".md"])
+
+    # ---- K-014
+    def test_k014_placeholder_names_and_same_person(self):
+        ex = example_text()
+        appr = "- Approved by: A. Shumilov, 2026-10-12"
+        for bad in ("- Approved by: person, 2026-10-12", "- Approved by: Name 2026-10-12", "- Approved by: <person>, 2026-10-12",
+                    "- Approved by: {…}, 2026-10-12", "- Approved by: {person}, 2026-10-12"):
+            self.assertIn("[L2]", chk(ex.replace(appr, bad)), bad)
+        v = ex.replace("status: draft", "status: verified").rstrip("\n") + "\n- " + ONLINE + "\n"
+        self.assertEqual(chk(v, ALLOWED), "")
+        out = chk(v.replace(appr, "- Approved by: B. Other, 2026-10-12"), ALLOWED)
+        self.assertIn("same person and date", out)
+        out = chk(v.replace(appr, "- Approved by: A. Shumilov, 2026-10-13"), ALLOWED)
+        self.assertIn("same person and date", out)
+        self.assertNotIn("same person", chk(ex.replace(appr, "- Approved by: B. Other, 2026-10-12")))     # draft: not compared
+
+
+class TestRoundTrip(Scratch):
+    """K-011: lit_run output, filled in as the workflow says, passes the gate."""
+    WORKS = [fake_work(1, "10.1/a", "Plain paper"), fake_work(2, "10.1/b", "Second paper", authors=("Zyxwvut Quillfeather",)),
+             fake_work(3, "10.1/c", "Third paper", year=2019)]
+
+    def fill(self, md, strategy, verified):
+        t = md.read_text(encoding="utf-8")
+        for ph in ("- Approved by: {person, YYYY-MM-DD}",
+                   "- Cost stated before running: {the cost as stated to the human and approved}"):
+            self.assertIn(ph, t)
+        t = t.replace("- Approved by: {person, YYYY-MM-DD}", "- Approved by: A. Shumilov, 2026-10-14")
+        t = t.replace("- Cost stated before running: {the cost as stated to the human and approved}",
+                      "- Cost stated before running: OpenAlex only, up to 80 credits; approved by A. Shumilov.")
+        ana = "Plain paper addresses the question [1]. Nothing here is a claim beyond that."
+        if strategy == "scout":
+            n = len(md.with_suffix(".csv").read_text(encoding="utf-8").splitlines()) - 1
+            ana += ("\n\n| paper | doi | link | what_measured | how_measured | constraints | value | unit | passage |\n"
+                    "|---|---|---|---|---|---|---|---|---|\n" + "".join("| P | d | l | w | h | c |  | s |  |\n" for _ in range(n)))
+        pre, rest = t.split("## 5. Analysis\n\n", 1)
+        t = pre + "## 5. Analysis\n\n" + ana + "\n\n## 6. Claims" + rest.split("## 6. Claims", 1)[1]
+        t = t.replace("|-------|-------|-------|----------|--------|\n",
+                      "|-------|-------|-------|----------|--------|\n| it is a paper | 1 | \"a quote\" | title | verified |\n", 1)
+        t = re_sub_candidates(t)
+        t = t.rstrip("\n") + "\n- Set approved by A. Shumilov, 2026-10-14.\n"
+        if verified:
+            t = t.replace("status: draft", "status: verified", 1)
+            t += "- " + ONLINE + "\n"
+        md.write_text(t, encoding="utf-8")
+
+    def test_round_trip(self):
+        env = {k: v for k, v in os.environ.items() if k not in ("OPENALEX_API_KEY", "CONSENSUS_API_KEY", "HYPOTHESIS_MCP_KEY")}
+        for strat in ("related", "review", "metareview", "scout"):
+            for plan in (ALLOWED, BLIND):
+                for verified in (False, True):
+                    with self.subTest(strategy=strat, plan=plan.name, verified=verified), mock.patch.dict(os.environ, env, clear=True):
+                        out = self.td / f"{strat}-{plan.stem}-{verified}"
+                        q = "10.5/anchor" if strat == "related" else "subject words"
+                        f = FakeGet(works=self.WORKS, anchor=fake_work(100, "10.5/anchor", "Neutral anchor title"))
+                        rc, msg = run_main([strat, q, "--system", "t", "--plan", str(plan), "--out", str(out)], f)
+                        self.assertEqual(rc, 0, msg)
+                        md = next(out.glob("*.md"))
+                        self.fill(md, strat, verified)
+                        fails = lit_gate.check(md, plan)
+                        self.assertEqual(fails, [], "\n".join(fails))
+                        rc, o = gate(md, plan)
+                        self.assertEqual(rc, 0, o)
+
+
+def re_sub_candidates(t):
+    """Section 7 as the agent writes it for a consistent Set: the placeholder becomes `none`."""
+    import re
+    return re.sub(r"(?m)^\{one candidate[^\n]*\}$", "none", t, count=1)
+
+
 class TestWorkingTree(Scratch):
     def test_gate_runs_do_not_modify_shipped_files(self):
         def h():
@@ -1161,7 +1472,7 @@ class TestOnline(Scratch):
 
     def test_gate_resolve_real(self):
         rc, out = gate(EXAMPLE, ALLOWED, resolve=True)
-        self.assertIn(rc, (0, 1))
+        self.assertEqual(rc, 0, out)
 
 
 if __name__ == "__main__":

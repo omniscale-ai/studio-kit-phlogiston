@@ -1,4 +1,4 @@
-# Deterministic structural constraints for PLAN, DATASET, RUN, COMPARISON.
+# Deterministic structural constraints for PLAN, DATASET, RUN, COMPARISON, LITERATURE.
 # Heading `pattern` must match the heading text in artifacts/<KIND>/template.md (without the number).
 # `## Table of Contents` is not listed here: `cfs validate` checks it through the TOC validator, as in the SDLC kit.
 # `references.<KIND>` without a `coverage` key = optional; `coverage = true` requires the citation, `coverage = false` prohibits it.

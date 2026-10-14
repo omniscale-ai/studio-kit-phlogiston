@@ -22,12 +22,12 @@
 6. **One run is one PLAN, written before the first phase executes.** The run's
    `research_question`, `literature`, `experiment_budget` and `num_cycles` are
    copied into it, not paraphrased; `literature` is the materials attached to
-   the run. The run's `literature_mode` (`none`, `allowed` or `blind`) is
-   copied into section 2 as the Literature mode. When the run has no
-   `literature_mode` field, the agent proposes one and the human confirms it
-   at Approval (P12); a mode copied from the run is shown at Approval and may
-   be changed there. The mode is never assumed. Under `blind` the Excluded
-   table is filled before approval.
+   the run. If the run config provides a `literature_mode` field (`none`,
+   `allowed` or `blind`), it is copied into section 2 as the Literature
+   mode, shown at Approval and may be changed there; otherwise the agent
+   proposes one and the human confirms it at Approval (P12). The mode is
+   never assumed. Under `blind` the Excluded table is filled before
+   approval.
 7. **Budget is counted in batches.** One simulate call is one batch of a fixed
    number of experiments set by the apparatus; the total is shared across all
    phases and each phase type has its own hard call limit for every tool. The
