@@ -97,7 +97,7 @@ def acquisition_rows(path) -> list:
     rows = [ln.strip() for ln in m.group(1).splitlines() if ln.strip().startswith("|")]
     if len(rows) < 2:
         raise SourceError(f"--dataset {path}: section 6 has no table")
-    cells = lambda ln: [c.strip() for c in re.split(r"(?<!\\)\|", ln.strip().strip("|"))]  # noqa: E731
+    cells = lambda ln: [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", ln.strip().strip("|"))]  # noqa: E731
     head = [c.lower() for c in cells(rows[0])]
 
     def col(prefix):
@@ -117,15 +117,37 @@ def acquisition_rows(path) -> list:
 
 
 NAMED = re.compile(r"^\s*(?P<names>[^:→]+?)\s*:\s*(?P<pair>\w+\s*→.*)$")
+SEP = re.compile(r";|<br\s*/?>", re.I)
+
+
+def cell_parts(cell: str) -> list:
+    """Non-empty parts of a Justification cell, split at `;` or `<br>` outside
+    backtick spans: a `type → target` in backticks is one part, `;` included."""
+    parts, start, code, i = [], 0, False, 0
+    while i < len(cell):
+        m = None if code or cell[i] == "`" else SEP.match(cell, i)
+        if m:
+            parts.append(cell[start:i])
+            start = i = m.end()
+            continue
+        code ^= cell[i] == "`"
+        i += 1
+    parts.append(cell[start:])
+    return [x for x in parts if x.strip()]
 
 
 def check_cell(b, e, cell, executed, bad):
     """D5 for one Justification cell: one shared `type → target` for every experiment
-    that ran, or `<names>: type → target` parts covering each of them."""
+    that ran, or `<names>: type → target` parts covering each of them, separated by
+    `;` outside backticks (a `;` inside a target belongs to it)."""
     key = lambda pj: (pj[0], norm_text(pj[1]))  # noqa: E731
     show = lambda pj: f"{pj[0]} → {pj[1]}"  # noqa: E731
     logged = {q["name"]: q["just"] for q in e["points"] if q.get("just")}
-    parts = [x.replace("`", "").replace("->", "→") for x in re.split(r";|<br\s*/?>", cell) if x.strip()]
+    if cell.count("`") % 2:
+        bad("D5", f"DATASET batch {b}: Justification has an unclosed backtick; copy each `type → target` "
+                  f"from the design log line {e['seq']} inside one pair of backticks")
+        return
+    parts = [x.replace("`", "").replace("->", "→") for x in cell_parts(cell)]
     if not parts:
         bad("D5", f"DATASET batch {b}: Justification is empty; copy it from the design log line {e['seq']}")
         return

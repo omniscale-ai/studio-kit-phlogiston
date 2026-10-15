@@ -11,8 +11,9 @@
 (UTC, taken from the clock, not from the caller), batch, phase, points,
 design_method. Every point has a name, its conditions and exactly one
 justification (P5): its own `justification` in --points, or the
---justification default for points that give none. Entries are never edited
-or deleted.
+--justification default for points that give none. A target is one line
+with no backtick; a `|` in it or in the design method is written `\\|`; a `;`
+is allowed. Entries are never edited or deleted.
 
 `hook` is the integration point before an experiment call. As a Claude Code
 PreToolUse hook it reads the hook JSON from stdin; from a CLI wrapper it takes
@@ -108,8 +109,17 @@ def same_point(a: dict, b: dict, rtol=RTOL, atol=ATOL) -> bool:
 
 def norm_text(s: str) -> str:
     """Comparison form of a justification target or design method."""
-    s = str(s).replace("`", "").replace("->", "→")
+    s = str(s).replace("`", "").replace("->", "→").replace("\\|", "|")
     return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def cell_breaker(s: str):
+    """What in `s` would break a DATASET table cell it is copied into verbatim, or None."""
+    if re.search(r"[\r\n]", s):
+        return "a line break"
+    if re.search(r"(?<!\\)\|", s):
+        return "a `|` (write it `\\|`)"
+    return None
 
 
 def parse_justification(s):
@@ -233,12 +243,22 @@ def make_entry(lines: list, batch, phase, points, justification, design_method, 
             raise ValueError(f"point {name} has no justification and no default --justification was given (P5)")
         if isinstance(raw, list):
             raise ValueError(f"point {name}: exactly one justification per point (P5)")
+        if isinstance(raw, str) and re.search(r"[\r\n]", raw.strip()):
+            raise ValueError(f"point {name}: justification {raw!r} has a line break; a target is one line")
         pj = parse_justification(raw)
         if pj is None:
             raise ValueError(f"point {name}: justification {raw!r} is not `<variance|information|boundary> → <target>`")
+        why = "a backtick" if "`" in pj[1] else cell_breaker(pj[1])
+        if why:
+            raise ValueError(f"point {name}: target {pj[1]!r} has {why}; DATASET section 6 copies it verbatim "
+                             "inside backticks in a table cell")
         out.append({"name": name, "conditions": q["conditions"], "justification": {"type": pj[0], "target": pj[1]}})
     if not str(design_method).strip():
         raise ValueError("design method is required")
+    why = cell_breaker(str(design_method).strip())
+    if why:
+        raise ValueError(f"design method {str(design_method).strip()!r} has {why}; DATASET section 6 copies it "
+                         "verbatim into a table cell")
     if not str(batch).strip():
         raise ValueError("batch is required")
     e = {"seq": len(lines) + 1, "prev": line_hash(lines[-1]) if lines else None,

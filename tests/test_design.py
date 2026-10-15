@@ -240,6 +240,104 @@ class TestDataset(Scratch):
         self.assertIn("is not `<variance|information|boundary> → <target>`", gate(LOG, ORACLE, self.put("D.md", ds))[1])
 
 
+class TestSemicolonTargets(Scratch):
+    """Targets with `;`: the separator of the cell's parts only counts outside backticks."""
+    LOG, ORACLE, DATASET = FIX / "design_log_semicolon.jsonl", FIX / "oracle_semicolon.jsonl", FIX / "DATASET_semicolon.md"
+    E9 = "`information → C_A shape at the hot end of the T range; with e8 it also gives the slope of log r0 in 1/T`"
+
+    def run_gate(self, ds):
+        return gate(self.LOG, self.ORACLE, self.put("D.md", ds))
+
+    def test_verbatim_copy_passes(self):
+        code, out = gate(self.LOG, self.ORACLE, self.DATASET)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.strip(), "PASS")
+
+    def test_truncated_target_fails_d5(self):
+        ds = self.DATASET.read_text().replace(self.E9, "`information → C_A shape at the hot end of the T range`")
+        code, out = self.run_gate(ds)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(rules(out), {"D5"})
+        self.assertIn("experiment e9 is justified as `information → C_A shape at the hot end of the T range`, the "
+                      "design log line 1 says `information → C_A shape at the hot end of the T range; with e8", out)
+        self.assertIn("copy it, do not reconstruct it", out)
+        self.assertNotIn("is not `<names>:", out)
+
+    def test_paraphrased_target_fails_d5(self):
+        ds = self.DATASET.read_text().replace(self.E9, "`information → hot end of T; with e8, slope of log r0 vs 1/T`")
+        code, out = self.run_gate(ds)
+        self.assertEqual(code, 1, out)
+        self.assertIn("experiment e9 is justified as `information → hot end of T; with e8, slope of log r0 vs 1/T`", out)
+
+    def test_shared_target_truncated_fails_d5(self):
+        ds = self.DATASET.read_text().replace("`variance → k1 at 25 °C; k2 held at its PRE-1 estimate`",
+                                              "`variance → k1 at 25 °C`")
+        out = self.run_gate(ds)[1]
+        self.assertIn("one justification `variance → k1 at 25 °C` for the whole batch, but the design log line 2 "
+                      "justifies e10 as `variance → k1 at 25 °C; k2 held at its PRE-1 estimate`", out)
+
+    def test_names_grouped_with_semicolon_targets_passes(self):
+        shared = "`variance → k1 at 25 °C; k2 held at its PRE-1 estimate`"
+        ds = self.DATASET.read_text().replace(f"| {shared} |", f"| e10: {shared}; e11: {shared} |")
+        code, out = self.run_gate(ds)
+        self.assertEqual(code, 0, out)
+
+    def test_br_separates_parts_outside_backticks(self):
+        ds = self.DATASET.read_text().replace(f"; e9: {self.E9}", f"<br>e9: {self.E9}")
+        code, out = self.run_gate(ds)
+        self.assertEqual(code, 0, out)
+
+    def test_unclosed_backtick_fails_d5(self):
+        ds = self.DATASET.read_text().replace(f"e9: {self.E9}", f"e9: {self.E9[:-1]}")
+        code, out = self.run_gate(ds)
+        self.assertEqual(code, 1, out)
+        self.assertIn("DATASET batch 1: Justification has an unclosed backtick", out)
+
+    def test_missing_names_prefix_is_not_hidden_by_backticks(self):
+        ds = self.DATASET.read_text().replace(f"; e9: {self.E9}", f"; {self.E9}")
+        out = self.run_gate(ds)[1]
+        self.assertIn("is not `<names>: <variance|information|boundary> → <target>`", out)
+        self.assertIn("experiment e9 ran and has no justification in the cell", out)
+
+    def test_cell_parts(self):
+        self.assertEqual(design_gate.cell_parts("e1: `variance → a; b`; e2, e3: `boundary → c`<br/>e4: `x → y`"),
+                         ["e1: `variance → a; b`", " e2, e3: `boundary → c`", "e4: `x → y`"])
+        self.assertEqual(design_gate.cell_parts("explore; the A axis"), ["explore", " the A axis"])
+        self.assertEqual(design_gate.cell_parts("`variance → k <br> 1`"), ["`variance → k <br> 1`"])
+
+
+class TestPipeTargets(Scratch):
+    """A `|` would split the table cell: it is written `\\|` in the log and in the cell."""
+
+    def one_batch(self, target):
+        log = self.td / "design_log.jsonl"      # written directly: append would refuse a bare `|`
+        log.write_text(json.dumps({"seq": 1, "prev": None, "written_at": "2026-10-01T09:00:00+00:00", "batch": "1",
+                                   "phase": "PRE-1", "points": [{"name": "x1", "conditions": {"A": 1.0}, "justification":
+                                                                 {"type": "information", "target": target}}],
+                                   "design_method": "manual: test"}) + "\n")
+        src = self.put("o.jsonl", json.dumps({"time": "2026-10-01T09:05:00+00:00", "points": {"x1": {"A": 1.0}}}) + "\n")
+        return log, src
+
+    def dataset(self, cell):
+        return self.put("D.md", "## 6. Acquisition\n\n| Batch | Justification | Design method |\n|---|---|---|\n"
+                                f"| 1 | {cell} | manual: test |\n")
+
+    def test_escaped_pipe_copied_verbatim_passes(self):
+        log, src = self.one_batch(r"sign of k1 \| k2")
+        code, out = gate(log, src, self.dataset(r"`information → sign of k1 \| k2`"))
+        self.assertEqual(code, 0, out)
+
+    def test_legacy_bare_pipe_in_log_matches_escaped_cell(self):
+        log, src = self.one_batch("sign of k1 | k2")      # an old log, written before append refused a bare `|`
+        code, out = gate(log, src, self.dataset(r"`information → sign of k1 \| k2`"))
+        self.assertEqual(code, 0, out)
+
+    def test_pipe_paraphrase_fails_d5(self):
+        log, src = self.one_batch(r"sign of k1 \| k2")
+        out = gate(log, src, self.dataset(r"`information → sign of k1 \| k3`"))[1]
+        self.assertIn("[D5]", out)
+
+
 class TestUsage(Scratch):
     def test_usage_errors_exit_2(self):
         self.assertEqual(subprocess.run([sys.executable, str(GATE), str(LOG)], capture_output=True).returncode, 2)
@@ -300,6 +398,36 @@ class TestAppendCli(Scratch):
         self.run_append(log, "1", "variance → k1")
         self.run_append(log, "1", "variance → k2")
         self.assertIn("batch 1 already registered", " ".join(m for _, m in design_log.load_log(log)[2]))
+
+    def test_append_accepts_semicolon_in_target(self):
+        log = self.td / "design_log.jsonl"
+        r = self.run_append(log, "1", "information → C_A shape at the low end; with e8 it also gives the slope")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(design_log.load_log(log)[1][0]["points"][0]["just"],
+                         ("information", "C_A shape at the low end; with e8 it also gives the slope"))
+
+    def test_append_refuses_characters_that_break_the_cell(self):
+        log = self.td / "design_log.jsonl"
+        for target, why in ((r"uses `k1` only", "a backtick"), ("k1 | k2", "a `|`"), ("k1\nk2", "a line break")):
+            pts = json.dumps({"x1": {"conditions": {"A": 1}, "justification": {"type": "variance", "target": target}}})
+            r = subprocess.run([sys.executable, str(LOGCLI), "append", "--log", str(log), "--batch", "1", "--phase", "P",
+                                "--points", pts, "--design-method", "manual: t"], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, target)
+            self.assertIn(f"point x1: target {target!r} has {why}", r.stderr)
+        r = self.run_append(log, "1", "boundary → T range\nand pH")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("a line break", r.stderr)
+        self.assertFalse(log.exists())
+        self.assertEqual(self.run_append(log, "1", r"variance → sign of k1 \| k2").returncode, 0)
+
+    def test_append_refuses_a_pipe_in_the_design_method(self):
+        log = self.td / "design_log.jsonl"
+        r = subprocess.run([sys.executable, str(LOGCLI), "append", "--log", str(log), "--batch", "1", "--phase", "P",
+                            "--points", '{"x1": {"A": 1}}', "--justification", "variance → k1",
+                            "--design-method", "tool | criterion"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("design method 'tool | criterion' has a `|`", r.stderr)
+        self.assertFalse(log.exists())
 
 
 class TestHook(Scratch):
@@ -396,6 +524,7 @@ class TestHook(Scratch):
                 "--tool", "oracle-cli"]
         self.assertEqual(design_log.main(args), 0)
         self.assertEqual(json.loads(self.wit.read_text())["tool"], "oracle-cli")
+
 
 
 class TestModule(unittest.TestCase):

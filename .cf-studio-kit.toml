@@ -6,7 +6,7 @@ manifest_version = "1.0"
 [[kits]]
 slug = "studio-kit-core"
 name = "studio-kit-core"
-version = "0.2.0"
+version = "0.2.1"
 
 # ── PLAN ────────────────────────────────────────────────────────
 [[kits.resources]]

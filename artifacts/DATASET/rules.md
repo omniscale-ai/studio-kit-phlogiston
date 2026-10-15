@@ -75,9 +75,12 @@ time.
    type `variance`, `information` or `boundary` (P5), and the batch's design
    method. `--points` is `{"<name>": {"conditions": {…}, "justification":
    "<type> → <target>"}, …}`; `--justification` is the default for points that
-   give none (`{"<name>": {<conditions>}}`). The script stamps
-   `written_at` from the clock and chains `prev` to the sha256 of the previous
-   line. Batch ids are unique; a re-planned batch gets a new id.
+   give none (`{"<name>": {<conditions>}}`). A target is one line with no
+   backtick, and a `|` in a target or in the design method is written `\|`:
+   section 6 copies them verbatim into a table cell, the target inside
+   backticks. A `;` in a target is allowed. `append` refuses anything else. The
+   script stamps `written_at` from the clock and chains `prev` to the sha256 of
+   the previous line. Batch ids are unique; a re-planned batch gets a new id.
 2. **Append only.** No line is edited, reordered or deleted, including after a
    failed call. A correction is a new entry.
 3. **The latest entry is the open batch.** A call may run only points of the
@@ -95,7 +98,9 @@ time.
    `design_method`. Justification is `` `type → target` `` when every point
    that ran shares it, otherwise `` <names>: `type → target` `` parts separated
    by `;` (e.g. `` e4: `information → …`; e5, e6: `variance → Km_B` ``) naming
-   every point that ran with its logged justification.
+   every point that ran with its logged justification. Each `type → target` is
+   copied verbatim inside one pair of backticks; only a `;` (or `<br>`)
+   outside backticks separates parts, so a `;` inside a target stays with it.
 7. **The time source is not the agent.** `--source` is a record the agent
    does not write: the oracle or simulator log converted to the acquisitions
    format, or the witness file the hook below writes. When the witness exists,
@@ -122,7 +127,7 @@ with one `call` value are one call) and `name`, every other column a condition.
 | D2 | the log was only appended to: every `prev` is the sha256 of the line before, `written_at` never decreases, every call's `design_head` equals the sha256 of the log's first `design_lines` lines, and no entry absent at a committed call claims a `written_at` before it (rule 2) |
 | D3 | every call ran after an entry was written, and each executed point was registered before its call, not later; with `--require-commit`, every call carries a commitment (rules 1, 3, 7) |
 | D4 | every executed point matches an unused registered point of the open entry within tolerance (rules 3, 4) |
-| D5 | with `--dataset`: section 6 has one row per batch that ran, in log order, each naming a logged batch, whose Justification gives every point that ran its logged `type → target` (shared or per name) and whose Design method equals the logged one (rule 6) |
+| D5 | with `--dataset`: section 6 has one row per batch that ran, in log order, each naming a logged batch, whose Justification gives every point that ran its logged `type → target` (shared or per name; parts split at `;` outside backticks) and whose Design method equals the logged one (rule 6) |
 
 The open entry is the last of the `design_lines` the call committed to, or,
 without a commitment, the latest entry whose `written_at` precedes the call.
