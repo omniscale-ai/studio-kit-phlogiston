@@ -338,6 +338,74 @@ class TestPipeTargets(Scratch):
         self.assertIn("[D5]", out)
 
 
+class TestVectorConditions(Scratch):
+    """Conditions that are lists and objects: same structure, numbers within tolerance element by element."""
+    LOG, ORACLE, DATASET = FIX / "design_log_vector.jsonl", FIX / "oracle_vector.jsonl", FIX / "DATASET_vector.md"
+    P = {"p1": 2, "p2": 1, "pos2": [3, 0], "velocity2": [0, 0.5], "measurement_times": [0, 5, 10], "duration": 10}
+    PROBES = {"probes": [{"pos": [1, 0], "vel": [0, 1]}, {"pos": [-1, 0], "vel": [0, -1]}], "duration": 20}
+
+    def oracle_with(self, old, new):
+        src = self.ORACLE.read_text()
+        self.assertIn(old, src)
+        return self.put("o.jsonl", src.replace(old, new, 1))
+
+    def test_honest_run_passes(self):
+        code, out = gate(self.LOG, self.ORACLE, self.DATASET)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.strip(), "PASS")
+
+    def test_changed_vector_element_fails_d4(self):
+        code, out = gate(self.LOG, self.oracle_with('"pos2": [3.0, 0.0]', '"pos2": [3.0, 0.1]'), self.DATASET)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(rules(out), {"D4"})
+        self.assertIn('"pos2": [3.0, 0.1]', out)
+        self.assertIn("matches no point of the open entry, line 1 (batch 1)", out)
+
+    def test_other_list_length_fails_d4(self):
+        out = gate(self.LOG, self.oracle_with('"measurement_times": [0.0, 5.0, 10.0]',
+                                              '"measurement_times": [0.0, 5.0, 10.0, 15.0]'), self.DATASET)[1]
+        self.assertEqual(rules(out), {"D4"})
+
+    def test_changed_nested_object_fails_d4(self):
+        out = gate(self.LOG, self.oracle_with('"vel": [0.0, -1.0]', '"vel": [0.0, -1.5]'), self.DATASET)[1]
+        self.assertEqual(rules(out), {"D4"})
+        self.assertIn("line 2 (batch 2)", out)
+
+    def test_same_value(self):
+        same = design_log.same_value
+        self.assertTrue(same([3, 0], [3.0, 0.0]))
+        self.assertFalse(same([3, 0], [3, 0.1]))
+        self.assertFalse(same([3, 0], [3, 0, 0]))
+        self.assertFalse(same([3, 0], [0, 3]))                              # list order counts
+        self.assertTrue(same({"a": 1, "b": [1, 2]}, {"b": [1.0, 2.0], "a": 1.0}))   # key order does not
+        self.assertFalse(same({"a": 1}, {"a": 1, "b": 2}))
+        self.assertFalse(same([1], 1))
+        self.assertFalse(same({"a": 1}, [1]))
+        self.assertTrue(same([], []))
+        self.assertTrue(same(10.0, 10.0000000001))
+        self.assertTrue(same("H2O", " H2O "))
+
+    def test_append_accepts_vectors_and_refuses_null_and_bool(self):
+        log = self.td / "design_log.jsonl"
+        design_log.append_entry(log, "1", "PRE-1", {"a": self.P, "b": self.PROBES}, "variance → p2", "manual: t")
+        _, entries, probs = design_log.load_log(log)
+        self.assertEqual(probs, [])
+        self.assertEqual(entries[0]["points"][0]["conditions"]["pos2"], [3, 0])
+        for bad, where in (({**self.P, "pos2": [3, None]}, "pos2[1]"), ({**self.P, "on": True}, "on"),
+                           ({"probes": [{"pos": [1, float("nan")]}]}, "probes[0].pos[1]")):
+            with self.assertRaises(ValueError) as cm:
+                design_log.append_entry(log, "2", "PRE-1", {"c": bad}, "variance → p2", "manual: t")
+            self.assertIn(f"condition {where}=", str(cm.exception))
+        self.assertEqual(len(design_log.raw_lines(log)), 1)
+
+    def test_append_cli_takes_the_example_point(self):
+        log = self.td / "design_log.jsonl"
+        r = subprocess.run([sys.executable, str(LOGCLI), "append", "--log", str(log), "--batch", "1", "--phase", "PRE-1",
+                            "--points", json.dumps({"x1": self.P}), "--justification", "variance → p2",
+                            "--design-method", "manual: t"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
 class TestUsage(Scratch):
     def test_usage_errors_exit_2(self):
         self.assertEqual(subprocess.run([sys.executable, str(GATE), str(LOG)], capture_output=True).returncode, 2)
@@ -525,6 +593,29 @@ class TestHook(Scratch):
         self.assertEqual(design_log.main(args), 0)
         self.assertEqual(json.loads(self.wit.read_text())["tool"], "oracle-cli")
 
+    def test_vector_point_admitted_as_floats(self):
+        P, PROBES = TestVectorConditions.P, TestVectorConditions.PROBES
+        self.register("1", P, PROBES)
+        as_floats = {"duration": 10.0, "measurement_times": [0.0, 5.0, 10.0], "velocity2": [0.0, 0.5],
+                     "pos2": [3.0, 0.0], "p2": 1.0, "p1": 2.0}
+        self.assertEqual(self.hook({"a": as_floats})[0], 0)
+        self.assertEqual(self.hook({"b": {"duration": 20.0, "probes": [{"vel": [0, 1], "pos": [1, 0]},
+                                                                       {"vel": [0, -1], "pos": [-1, 0]}]}})[0], 0)
+        code, err = self.hook({"c": P})                       # already used
+        self.assertEqual(code, 2)
+        self.assertIn("not an unused point of the latest design-log entry", err)
+        code, out = gate(self.log, self.wit, None, "--require-commit")
+        self.assertEqual(code, 0, out)
+
+    def test_vector_element_or_length_change_is_blocked(self):
+        P = TestVectorConditions.P
+        self.register("1", P)
+        for changed in ({**P, "pos2": [3, 0.1]}, {**P, "measurement_times": [0, 5]},
+                        {**P, "pos2": [0, 3]}, {**P, "pos2": 3}):
+            code, err = self.hook({"x": changed})
+            self.assertEqual(code, 2, changed)
+            self.assertIn("design_log hook: call blocked", err)
+        self.assertFalse(self.wit.exists())
 
 
 class TestModule(unittest.TestCase):

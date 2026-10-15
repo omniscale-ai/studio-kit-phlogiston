@@ -87,8 +87,13 @@ time.
    latest entry written before it, each at most as many times as it is
    registered. Appending the next entry closes the previous one: a point of a
    closed batch is run again only through a new entry.
-4. **Points match within tolerance.** Same condition keys; numbers equal
-   within rtol 1e-6 and atol 1e-9 (`--rtol`, `--atol`); strings equal. Register
+4. **Points match within tolerance.** A condition is a number, a string, or a
+   list or object of them at any depth (a vector, a list of probes); null and
+   booleans are refused, write a flag as 0/1 or a string. Two points match when
+   they have the same structure (the same keys at every level, lists of the same
+   length), numbers equal element by element within rtol 1e-6 and atol 1e-9
+   (`--rtol`, `--atol`), and strings equal. Key order does not count, list order
+   does: `[3, 0]` matches `[3.0, 0.0]`, not `[0, 3]` or `[3, 0, 0]`. Register
    conditions in the units the call takes, not the effective units of section 7.
 5. **A registered point that never ran is allowed.** The gate prints it as a
    `note:`; Known Defects says why. It is not run later from the closed entry
@@ -116,8 +121,10 @@ violation `[Dk] message`, `note:` lines, then PASS or FAIL.
 **Acquisitions format.** JSONL, one call per line: `time` (ISO 8601 with an
 offset, or epoch seconds) and `points` (a list of `{name, conditions}`, or
 label → conditions); optional `design_lines` and `design_head` (the log
-commitment). Or CSV, one experiment per row: `time`, optional `call` (rows
-with one `call` value are one call) and `name`, every other column a condition.
+commitment); conditions may be vectors and objects (rule 4). Or CSV, one
+experiment per row: `time`, optional `call` (rows with one `call` value are one
+call) and `name`, every other column a condition. CSV is for scalar conditions
+only: a vector in a CSV cell is read as a string and matches no point.
 
 ### Design gate (`{design_gate}`)
 

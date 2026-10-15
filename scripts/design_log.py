@@ -65,9 +65,10 @@ def norm_points(raw) -> list:
 
     Accepts a list of {'name', 'conditions'[, 'justification']} objects, a list
     of bare condition objects, or a mapping label -> conditions (the shape of a
-    simulate request) or label -> {'conditions', 'justification'}. A point's
-    justification is kept raw under 'justification' (None if absent).
-    Raises ValueError on anything else."""
+    simulate request) or label -> {'conditions', 'justification'}. A condition
+    value is a number, a string, or a list or object of them at any depth; no
+    null, no boolean. A point's justification is kept raw under 'justification'
+    (None if absent). Raises ValueError on anything else."""
     if isinstance(raw, dict):
         raw = [{**v, "name": k} if isinstance(v, dict) and isinstance(v.get("conditions"), dict)
                else {"name": k, "conditions": v} for k, v in raw.items()]
@@ -85,26 +86,45 @@ def norm_points(raw) -> list:
         if not cond:
             raise ValueError("a point has no conditions")
         for k, v in cond.items():
-            if isinstance(v, bool) or not isinstance(v, (int, float, str)):
-                raise ValueError(f"condition {k}={v!r} is neither a number nor a string")
-            if isinstance(v, float) and not math.isfinite(v):
-                raise ValueError(f"condition {k}={v!r} is not finite")
+            check_value(str(k), v)
         out.append({"name": None if name is None else str(name), "conditions": dict(cond), "justification": just})
     return out
 
 
+def check_value(path: str, v) -> None:
+    """Raise ValueError unless v is a finite number, a string, or a list or
+    object of them at any depth."""
+    if isinstance(v, list):
+        for i, x in enumerate(v):
+            check_value(f"{path}[{i}]", x)
+    elif isinstance(v, dict):
+        for k, x in v.items():
+            check_value(f"{path}.{k}", x)
+    elif isinstance(v, bool) or not isinstance(v, (int, float, str)):
+        raise ValueError(f"condition {path}={v!r} is neither a number, a string, nor a list or object of them")
+    elif isinstance(v, float) and not math.isfinite(v):
+        raise ValueError(f"condition {path}={v!r} is not finite")
+
+
+def same_value(x, y, rtol=RTOL, atol=ATOL) -> bool:
+    """Numbers within tolerance, other scalars equal as stripped strings; lists of
+    the same length element by element, objects with the same keys key by key."""
+    if isinstance(x, dict) or isinstance(y, dict):
+        return isinstance(x, dict) and isinstance(y, dict) and set(x) == set(y) \
+            and all(same_value(x[k], y[k], rtol, atol) for k in x)
+    if isinstance(x, list) or isinstance(y, list):
+        return isinstance(x, list) and isinstance(y, list) and len(x) == len(y) \
+            and all(same_value(a, b, rtol, atol) for a, b in zip(x, y))
+    if isinstance(x, (int, float)) and isinstance(y, (int, float)) \
+            and not isinstance(x, bool) and not isinstance(y, bool):
+        return math.isclose(x, y, rel_tol=rtol, abs_tol=atol)
+    return str(x).strip() == str(y).strip()
+
+
 def same_point(a: dict, b: dict, rtol=RTOL, atol=ATOL) -> bool:
-    """Same condition keys; numbers within tolerance, strings equal."""
-    if set(a) != set(b):
-        return False
-    for k in a:
-        x, y = a[k], b[k]
-        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
-            if not math.isclose(x, y, rel_tol=rtol, abs_tol=atol):
-                return False
-        elif str(x).strip() != str(y).strip():
-            return False
-    return True
+    """Same condition keys and same structure; numbers within tolerance element
+    by element, strings equal. Key order is ignored, list order is not."""
+    return same_value(a, b, rtol, atol)
 
 
 def norm_text(s: str) -> str:

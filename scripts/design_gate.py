@@ -11,8 +11,9 @@ simulator log converted to the acquisitions format, or the witness file of
 `design_log.py hook`. JSONL, one call per line: `time` plus `points` (list or
 label -> conditions) or `conditions`, optionally `design_lines` and
 `design_head`; or CSV, one experiment per row: `time`, optional `call` and
-`name`, every other column a condition. Checks D1-D5 are those of the
-"Design gate" table in artifacts/DATASET/rules.md. One line per violation
+`name`, every other column a scalar condition (vectors and objects need
+JSONL). Checks D1-D5 are those of the "Design gate" table in
+artifacts/DATASET/rules.md. One line per violation
 `[Dk] message`, `note:` lines for registered points never run, then PASS or
 FAIL - n violation(s).
 """
