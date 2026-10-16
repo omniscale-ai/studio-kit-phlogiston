@@ -19,7 +19,10 @@ is allowed. Entries are never edited or deleted.
 PreToolUse hook it reads the hook JSON from stdin; from a CLI wrapper it takes
 --points. It admits the call only if every point matches an unused point of
 the latest entry, then appends a witness record (time, tool, design_lines,
-design_head, points). Exit 0 admit, 2 block (reason on stderr), 1 usage error.
+design_head, points). Each witness point carries the executed conditions as
+passed and the `name` of the registered point it was matched to, also when
+the tool input is unnamed (witnesses before kit 0.4.1 kept the tool's label,
+or null). Exit 0 admit, 2 block (reason on stderr), 1 usage error.
 """
 from __future__ import annotations
 
@@ -343,9 +346,11 @@ def admit(log, witness, points, tool="") -> str:
             if same_point(q["conditions"], u):
                 del free[k]
                 break
+    matched = []
     for p in pts:
         for k, q in enumerate(free):
             if same_point(q["conditions"], p["conditions"]):
+                matched.append(q["name"])
                 del free[k]
                 break
         else:
@@ -353,7 +358,7 @@ def admit(log, witness, points, tool="") -> str:
                 f"point {json.dumps(p['conditions'], sort_keys=True)} is not an unused point of the latest design-log "
                 f"entry (seq {n}, batch {open_e['batch']}); append an entry for it first (P5)")
     rec = {"time": now_iso(), "tool": tool, "design_lines": n, "design_head": prefix_hash(lines, n),
-           "points": [{"name": p["name"], "conditions": p["conditions"]} for p in pts]}
+           "points": [{"name": n, "conditions": p["conditions"]} for n, p in zip(matched, pts)]}
     line = json.dumps(rec, ensure_ascii=False, separators=(", ", ": "))
     with open(wp, "a", encoding="utf-8") as f:
         f.write(line + "\n")

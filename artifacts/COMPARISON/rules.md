@@ -66,9 +66,12 @@ gate:
 
 Exit 0 PASS, 1 FAIL, 2 usage error or unreadable `--source` / `--submission`.
 One line per violation `[Rk] message`, `note:` lines, then PASS or FAIL.
-`--source` is the same non-agent acquisitions record as for the design gate;
-without it the experiments are read from DATASET section 6 (Experiments
-column). Without `--budget-left` an `open` pair fails, since the gate cannot
+`--source` is the same non-agent acquisitions record as for the design gate,
+typically the hook's witness, whose points carry the registered names; a
+source with unnamed points (a witness from before kit 0.4.1) needs
+`--design-log architecture/design_log.jsonl` to name them against the
+committed log. Without `--source` the experiments are read from DATASET
+section 6 (Experiments column). Without `--budget-left` an `open` pair fails, since the gate cannot
 tell whether budget remains.
 
 | ID | The gate refuses the result unless |

@@ -20,6 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+import design_log  # noqa: E402
 import result_gate  # noqa: E402
 
 GATE = ROOT / "scripts" / "result_gate.py"
@@ -419,6 +420,72 @@ class TestUsage(Workspace):
         self.assertIn("[R1] DATASET", out)
 
 
+class TestHookWitnessAsSource(Workspace):
+    """The full PASS workspace with the acquisitions source written by `design_log.py hook`
+    from unnamed tool inputs, as a harness that follows the kit produces it."""
+    BATCHES = (("1", {"e1": {"x": 0.0}, "e2": {"x": 1.0}}, "variance → a"),
+               ("2", {"e3": {"x": 2.0}, "e4": {"x": 3.0}}, f"information → cpt-t-comparison-c1 pair {A0} vs alternative"))
+
+    def setUp(self):
+        super().setUp()
+        self.log, self.wit = self.td / "design_log.jsonl", self.td / "design_witness.jsonl"
+        for batch, pts, just in self.BATCHES:
+            design_log.append_entry(self.log, batch, "P", pts, just, "manual: test")
+            unnamed = [dict(c) for c in reversed(list(pts.values()))]          # a plain list, any order
+            r = subprocess.run([sys.executable, str(ROOT / "scripts" / "design_log.py"), "hook", "--log",
+                                str(self.log), "--witness", str(self.wit), "--points", json.dumps(unnamed),
+                                "--tool", "simulate"], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        (self.td / "acquisitions.jsonl").unlink()                              # only the witness remains
+
+    def old_witness(self):
+        """The same witness as written before kit 0.4.1: no names."""
+        lines = []
+        for ln in self.wit.read_text().splitlines():
+            w = json.loads(ln)
+            w["points"] = [{"name": None, "conditions": q["conditions"]} for q in w["points"]]
+            lines.append(json.dumps(w))
+        return self.put("old_witness.jsonl", "\n".join(lines) + "\n")
+
+    def test_witness_names_the_registered_points(self):
+        names = [q["name"] for ln in self.wit.read_text().splitlines() for q in json.loads(ln)["points"]]
+        self.assertEqual(names, ["e2", "e1", "e4", "e3"])
+
+    def test_result_gate_accepts_the_hook_witness(self):
+        code, out = self.gate(**{"--source": "design_witness.jsonl"})
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.strip(), "PASS")
+
+    def test_hook_witness_still_catches_a_new_batch(self):
+        design_log.append_entry(self.log, "3", "P", {"e5": {"x": 4.0}}, "boundary → x range", "manual: test")
+        design_log.admit(self.log, self.wit, [{"x": 4.0}], "simulate")
+        code, out = self.gate(**{"--source": "design_witness.jsonl"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("the closest, c2.md, misses e5", out)
+
+    def test_old_unnamed_witness_needs_the_design_log(self):
+        self.old_witness()
+        code, out = self.gate(**{"--source": "old_witness.jsonl"})
+        self.assertEqual(code, 2)
+        self.assertIn("pass --design-log", out)
+        code, out = self.gate(**{"--source": "old_witness.jsonl", "--design-log": "design_log.jsonl"})
+        self.assertEqual(code, 0, out)
+
+    def test_old_witness_with_a_rewritten_log_is_refused(self):
+        self.old_witness()
+        lines = self.log.read_text().splitlines()
+        e = json.loads(lines[0])
+        e["points"][0]["name"] = "e9"
+        lines[0] = json.dumps(e)
+        self.log.write_text("\n".join(lines) + "\n")
+        code, out = self.gate(**{"--source": "old_witness.jsonl", "--design-log": "design_log.jsonl"})
+        self.assertEqual(code, 2)
+        self.assertIn("not valid", out)
+
+    def test_design_log_without_source_is_a_usage_error(self):
+        self.assertEqual(self.gate(source=False, **{"--design-log": "design_log.jsonl"})[0], 2)
+
+
 class TestHook(Workspace):
     def hook(self, **kw):
         wit = self.td / "result_witness.jsonl"
@@ -434,7 +501,7 @@ class TestHook(Workspace):
         self.assertEqual(out.strip(), "PASS")
         self.assertEqual(len(wit), 1)
         w = wit[0]
-        self.assertEqual((w["verdict"], w["violations"], w["gate"], w["version"]), ("PASS", [], "result_gate", "0.4.0"))
+        self.assertEqual((w["verdict"], w["violations"], w["gate"], w["version"]), ("PASS", [], "result_gate", "0.4.1"))
         self.assertEqual(w["submission_sha256"], sha(SUBMISSION))
         self.assertEqual((w["comparison"], w["selected"], w["budget_left"]), ("cpt-t-comparison-c2", A, 3))
         self.assertEqual(w["source_sha256"], hashlib.sha256((self.td / "acquisitions.jsonl").read_bytes()).hexdigest())

@@ -149,7 +149,9 @@ without a commitment, the latest entry whose `written_at` precedes the call.
 The kit does not own the experiment interface; it ships the check, and the
 project wires it in. `{design_log} hook` admits a call only if each point is an
 unused point of the latest entry, then appends a witness record (time, tool,
-`design_lines`, `design_head`, points); otherwise it exits 2 and the call is
+`design_lines`, `design_head`, points: the executed conditions as passed, each
+with the `name` of the registered point it matched, also when the call itself
+names none); otherwise it exits 2 and the call is
 blocked. As a Claude Code `PreToolUse` hook in `.claude/settings.json`:
 
 ```json

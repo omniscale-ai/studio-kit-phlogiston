@@ -5,7 +5,7 @@ holds. Stdlib only.
 
     python3 scripts/result_gate.py --plan <PLAN.md> --dataset <DATASET.md>
             --runs <runs dir> --comparisons <comparisons dir> --submission <file>
-            [--source <acquisitions>] [--budget-left N]
+            [--source <acquisitions> [--design-log <design_log.jsonl>]] [--budget-left N]
     python3 scripts/result_gate.py hook --witness <result_witness.jsonl> <the same options>
 
 Gate mode prints one line per violation `[Rk] message`, `note:` lines, then
@@ -53,7 +53,7 @@ the agent's. It runs the same checks, appends one JSON line to --witness and
 exits 0 to accept, 2 to refuse (the report goes to stderr), 1 on a usage
 error (nothing is written). The witness line:
 
-  {"time": ISO 8601 UTC, "gate": "result_gate", "version": "0.4.0",
+  {"time": ISO 8601 UTC, "gate": "result_gate", "version": "0.4.1",
    "gate_sha256": sha256 of this script, "verdict": "PASS" | "FAIL" | "ERROR",
    "violations": ["[Rk] ...", ...], "notes": [...], "submission": path,
    "submission_sha256": hex | null, "comparison": ID | null,
@@ -63,7 +63,13 @@ error (nothing is written). The witness line:
 ERROR means the source or the submission could not be read; it refuses.
 --source is in the acquisitions format of design_gate.py (JSONL calls with
 named `points`, or CSV with a `name` column): a record the agent does not
-write. --budget-left is the number of experiment batches (calls) the run may
+write, typically the witness of `design_log.py hook`, whose points carry the
+names of the registered points they matched. A source with unnamed points (a
+witness written before kit 0.4.1) is named from --design-log: each call's
+points are matched, as the hook matches them, to the unused points of the
+entry the call committed to (`design_lines`, after checking `design_head`
+against the log), or without a commitment to the latest entry written before
+the call. A point that cannot be named this way is an unreadable source. --budget-left is the number of experiment batches (calls) the run may
 still make.
 """
 from __future__ import annotations
@@ -79,8 +85,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from design_gate import SourceError, load_source  # noqa: E402
+from design_log import load_log, prefix_hash, same_point  # noqa: E402
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 CONSTRAINTS = HERE.parent / "constraints.toml"
 SHA = re.compile(r"[0-9a-f]{64}")
 RESULTS = {"pass": "pass", "p": "pass", "fail": "fail", "f": "fail",
@@ -369,7 +376,36 @@ def dominates(a: list, b: list) -> bool:
     return all(x == "pass" or y == "fail" for x, y in zip(a, b)) and any(x == "pass" and y == "fail" for x, y in zip(a, b))
 
 
-def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_left=None):
+def name_from_log(calls: list, log) -> None:
+    """Fill in the names of unnamed source points from the design log (old witnesses).
+    Raises SourceError if the log is unusable or a point matches no registered point."""
+    try:
+        lines, entries, probs = load_log(log)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SourceError(f"cannot read --design-log {log}: {exc}")
+    if probs:
+        raise SourceError(f"--design-log {log} is not valid: " + "; ".join(f"[{r}] {m}" for r, m in probs[:3]))
+    free = {e["seq"]: list(e["points"]) for e in entries}
+    for c in calls:
+        n = c["lines"]
+        if n is not None or c["head"] is not None:
+            if not isinstance(n, int) or not 0 < n <= len(lines) or c["head"] != prefix_hash(lines, n):
+                raise SourceError(f"{c['where']}: the design log no longer starts with the {n!r} line(s) the call "
+                                  "committed to; its points cannot be named from it")
+        else:
+            n = max((e["seq"] for e in entries if e["time"] is not None and e["time"] < c["time"]), default=0)
+        for p in c["points"]:
+            k = next((k for k, q in enumerate(free.get(n, [])) if same_point(q["conditions"], p["conditions"])), None)
+            if k is None:
+                if not p["name"]:
+                    raise SourceError(f"{c['where']}: an unnamed experiment matches no unused point of design-log "
+                                      f"line {n}")
+                continue
+            q = free[n].pop(k)
+            p["name"] = p["name"] or q["name"]
+
+
+def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_left=None, design_log=None):
     """(violations, notes, info). Raises SourceError if --source or --submission
     cannot be read."""
     fails, notes = [], []
@@ -387,10 +423,13 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
     ds = load_dataset(dataset, bad)
     if source:
         calls = load_source(source)
+        if design_log and any(not p["name"] for c in calls for p in c["points"]):
+            name_from_log(calls, design_log)
         acquired = [p["name"] for c in calls for p in c["points"]]
         if any(not n for n in acquired):
             raise SourceError(f"--source {source}: {sum(1 for n in acquired if not n)} experiment(s) have no name; "
-                              "the snapshot is checked by experiment name")
+                              "the snapshot is checked by experiment name; pass --design-log to name them "
+                              "from the design log")
         acquired = Counter(str(n).strip() for n in acquired)
     else:
         acquired = Counter(n for r in (ds["rows"] if ds else []) for n in r["experiments"])
@@ -616,7 +655,8 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
 
 # ── CLI ─────────────────────────────────────────────────────────
 
-OPTS = ("--plan", "--dataset", "--runs", "--comparisons", "--submission", "--source", "--budget-left")
+OPTS = ("--plan", "--dataset", "--runs", "--comparisons", "--submission", "--source", "--budget-left",
+        "--design-log")
 NEED = ("--plan", "--dataset", "--runs", "--comparisons", "--submission")
 
 
@@ -630,6 +670,8 @@ def parse(argv, allowed):
         i += 2
     if any(k not in o for k in NEED):
         raise ValueError("missing option")
+    if "--design-log" in o and "--source" not in o:
+        raise ValueError("--design-log needs --source")
     if "--budget-left" in o:
         if not re.fullmatch(r"\d+", o["--budget-left"].strip()):
             raise ValueError("--budget-left")
@@ -639,7 +681,7 @@ def parse(argv, allowed):
 
 def run_check(o):
     return check(o["--plan"], o["--dataset"], o["--runs"], o["--comparisons"], o["--submission"],
-                 o.get("--source"), o.get("--budget-left"))
+                 o.get("--source"), o.get("--budget-left"), o.get("--design-log"))
 
 
 def hook(o) -> int:

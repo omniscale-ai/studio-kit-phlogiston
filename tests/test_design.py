@@ -586,6 +586,36 @@ class TestHook(Scratch):
         self.assertEqual(code, 1)
         self.assertIn("no design_head / design_lines recorded", out)
 
+    def test_unnamed_tool_input_records_the_matched_names(self):
+        self.register("1", self.p1, self.p2)                  # registered as x0, x1
+        swapped_as_floats = [{**self.p2, "temperature": 25.0}, self.p1]
+        self.assertEqual(self.hook(swapped_as_floats)[0], 0)
+        w = json.loads(self.wit.read_text())
+        self.assertEqual([q["name"] for q in w["points"]], ["x1", "x0"])
+        self.assertEqual([q["conditions"] for q in w["points"]], swapped_as_floats)   # kept as passed
+        code, out = gate(self.log, self.wit, None, "--require-commit")
+        self.assertEqual(code, 0, out)
+
+    def test_labelled_tool_input_records_the_registered_name(self):
+        self.register("1", self.p1)
+        self.hook({"tool-label": self.p1})
+        self.assertEqual(json.loads(self.wit.read_text())["points"][0]["name"], "x0")
+
+    def test_old_unnamed_witness_still_passes_the_gate(self):
+        self.register("1", self.p1, self.p2)
+        self.hook([self.p1])
+        self.register("2", {**self.p1, "temperature": 45})
+        self.hook([{**self.p1, "temperature": 45}])
+        old = []                                              # as written before kit 0.4.1
+        for ln in self.wit.read_text().splitlines():
+            w = json.loads(ln)
+            w["points"] = [{"name": None, "conditions": q["conditions"]} for q in w["points"]]
+            old.append(json.dumps(w))
+        self.wit.write_text("\n".join(old) + "\n")
+        code, out = gate(self.log, self.wit, None, "--require-commit")
+        self.assertEqual(code, 0, out)
+        self.assertIn("note: batch 1 (line 1): 1 registered point(s) never ran", out)
+
     def test_points_option_for_a_cli_wrapper(self):
         self.register("1", self.p1)
         args = ["hook", "--log", str(self.log), "--witness", str(self.wit), "--points", json.dumps([self.p1]),
