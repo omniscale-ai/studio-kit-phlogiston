@@ -88,7 +88,7 @@ status: draft
 | Justification | What must be stated for each point | Typical method |
 |---------------|------------------------------------|----------------|
 | Variance reduction | which output(s) (parameter, estimate, decision margin) it tightens and the expected gain | design tool with current model and estimates ({criterion}) |
-| Information / discrimination | which open pair of the latest COMPARISON it separates, which hypothesis IDs differ between its members, and how different their predictions are at this point | design tool over competing models, or a manual discriminating design |
+| Information / discrimination | which open pair of the latest COMPARISON it separates, which hypothesis IDs differ between its members, and how different their predictions are at this point; or, when the COMPARISON selects nothing, which fail mode of a non-dominated candidate it probes (`fail mode <RUN ID> <criterion>: <where>`) | design tool over competing models, or a manual discriminating design |
 | Boundary of applicability | which assumption or condition range is being pushed and what the current law predicts there | manual, at or beyond the edge of the explored condition ranges |
 
 {Rules for this run: when the design tool is mandatory, when manual points are allowed, how many boundary points per cycle, and what happens when a proposed point duplicates an existing one within noise.}
@@ -159,6 +159,7 @@ Frozen at: {date, before phase 1}. Confirmed by: {person}.
 **Threshold**: {…}
 **Direction**: {within / <= / >=}
 **How measured**: mechanical: {formula}
+**Attainability**: {what a correct candidate scores on this metric under the stated noise and the parameter uncertainty a fit to that noise leaves (computed, or simulated on noise-only replicates of the true structure), the margin to the threshold, and how far one unit in a highly sensitive regime can move a pooled value}
 **Origin and justification**: given or proposed: {what it measures, why it answers section 1, what it would miss}
 **Confirmed by**: {person, date}
 
@@ -208,7 +209,7 @@ Frozen at: {date, before phase 1}. Confirmed by: {person}.
 
 ## 10. Stop Conditions
 
-{When the run stops early: simulate or real budget exhausted; every checklist row TESTED and the best RUN on ground truth passes all criteria; the user stops the run; a tool failure fails the phase rather than being retried silently; actual simulation time exceeds the confirmed cost by {factor}; the human changes the metric, which closes this PLAN and opens a new one. Budget left over is not a reason to stop early, and fewer experiments is never one: while the latest COMPARISON has an `open` pair and budget remains, the run continues with the batch that separates it. A final result is presented only after `{result_gate}` PASS (COMPARISON rules 8, 9).}
+{When the run stops early: simulate or real budget exhausted; every checklist row TESTED and the best RUN on ground truth passes all criteria; the user stops the run; a tool failure fails the phase rather than being retried silently; actual simulation time exceeds the confirmed cost by {factor}; the human changes the metric, which closes this PLAN and opens a new one. Budget left over is not a reason to stop early, and fewer experiments is never one: while the latest COMPARISON has an `open` pair, or selects nothing, and budget remains, the run continues with the batch that separates the pair or probes the fail mode. A failing criterion is not a stop condition; at budget 0 with nothing selected the result is the best available candidate, reported as such. A final result is presented only after `{result_gate}` PASS (COMPARISON rules 8, 9).}
 
 ## 11. Approval
 

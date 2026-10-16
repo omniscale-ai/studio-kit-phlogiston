@@ -34,6 +34,12 @@ ALWAYS run `python3 {result_gate} --plan architecture/PLAN.md --dataset architec
 
 NEVER stop with a result WHILE the latest COMPARISON has an `open` pair and budget remains; fewer experiments is never a reason
 
+NEVER stop WHILE the latest COMPARISON selects `none` and budget remains: name the fail mode of each non-dominated candidate (biased or imprecise, and where; per-unit breakdown of a pooled criterion), then run a batch justified `information → fail mode <RUN ID> <criterion>: <where>` or add a structurally different candidate
+
+ALWAYS, at budget 0 with nothing selected, submit the `**Best available**:` candidate with its `**Fails**:` after `{result_gate}` PASS with `--budget-left 0`, and NEVER present it as passing the PLAN's criteria
+
+NEVER loosen a criterion after seeing which candidate it favours; a criterion changes only in a new PLAN with a reason stated in terms of the measurement
+
 ALWAYS follow `{literature_workflow}` WHEN literature is to be searched, cited or put into a PLAN
 
 NEVER search literature WHEN there is no PLAN, its Literature mode is `none`, or the mode is not yet confirmed by the human

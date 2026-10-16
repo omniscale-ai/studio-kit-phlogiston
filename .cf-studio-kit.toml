@@ -6,7 +6,7 @@ manifest_version = "1.0"
 [[kits]]
 slug = "studio-kit-core"
 name = "studio-kit-core"
-version = "0.4.1"
+version = "0.4.2"
 
 # ── PLAN ────────────────────────────────────────────────────────
 [[kits.resources]]
@@ -190,7 +190,7 @@ source = "scripts/result_gate.py"
 install_path = "scripts/result_gate.py"
 type = "file"
 user_modifiable = false
-description = "Gate for a final result: rules R1-R6 (final snapshot, structural alternatives, copied vectors, submission = selection, stopping rule, structure) and the hook that writes a witness line and refuses"
+description = "Gate for a final result: rules R1-R6 (final snapshot, structural alternatives, copied vectors, submission = selection or best available at budget 0, stopping rule, structure) and the hook that writes a witness line and refuses"
 
 # ── constraints (keep LAST: the artifact bindings below attach to this resource)
 [[kits.resources]]

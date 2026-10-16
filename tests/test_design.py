@@ -240,6 +240,26 @@ class TestDataset(Scratch):
         self.assertIn("is not `<variance|information|boundary> → <target>`", gate(LOG, ORACLE, self.put("D.md", ds))[1])
 
 
+class TestFailModeTarget(Scratch):
+    """A batch aimed at a fail mode of a candidate when nothing is selected (COMPARISON rule 10)."""
+    TARGET = "fail mode cpt-enz-run-a cpt-enz-criterion-quality: residuals of e3, e4 at high A"
+
+    def test_fail_mode_target_is_registered_and_gated(self):
+        log = self.td / "design_log.jsonl"
+        r = subprocess.run([sys.executable, str(LOGCLI), "append", "--log", str(log), "--batch", "1", "--phase", "CYCLE-2",
+                            "--points", json.dumps({"f1": {"A": 20.0}, "f2": {"A": 30.0}}),
+                            "--justification", f"information → {self.TARGET}", "--design-method", "manual: test"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        src = self.put("o.jsonl", json.dumps({"time": "2099-01-01T00:00:00+00:00",
+                                              "points": {"f1": {"A": 20.0}, "f2": {"A": 30.0}}}) + "\n")
+        ds = self.put("D.md", "## 6. Acquisition\n\n| Batch | Justification | Design method |\n|---|---|---|\n"
+                              f"| 1 | `information → {self.TARGET}` | manual: test |\n")
+        code, out = gate(log, src, ds)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.strip(), "PASS")
+
+
 class TestSemicolonTargets(Scratch):
     """Targets with `;`: the separator of the cell's parts only counts outside backticks."""
     LOG, ORACLE, DATASET = FIX / "design_log_semicolon.jsonl", FIX / "oracle_semicolon.jsonl", FIX / "DATASET_semicolon.md"

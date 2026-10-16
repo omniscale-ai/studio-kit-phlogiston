@@ -60,7 +60,8 @@ P5. **New points are designed, not guessed.** Every proposed experiment is
     before the call and checked against a non-agent time source by
     `{design_gate}`.
     RUN: Outputs end with the handoff (variance and boundary targets).
-    COMPARISON: Open Pairs are the only `information →` targets.
+    COMPARISON: Open Pairs, and when nothing is selected the fail modes of
+    the non-dominated candidates, are the only `information →` targets.
 
 P6. **A hypothesis is the fewest free parameters that explain, plus where it holds; equal quality goes to the fewer parameters.** The starting candidate is the simplest one; every further hypothesis states how many free parameters it adds and the conditions under which it is claimed to apply. The PLAN
     declares what "equal quality" means before any RUN; among candidates within
@@ -84,9 +85,11 @@ P7. **The metric is agreed with a human, argued when proposed, and frozen
     frozen when the first phase starts: no row added, removed, or
     re-thresholded. A criterion that turns out wrong is raised with the human;
     the fix is a new PLAN with a new ID, and verdicts under the old PLAN stand.
-    PLAN: Verdict Criteria blocks, Origin and justification and Confirmed by fields, Frozen at line. RUN: the verdict table has exactly the PLAN's rows and
+    PLAN: Verdict Criteria blocks, Origin and justification, Attainability and Confirmed by fields, Frozen at line; a revision states its reason in terms of the measurement, never of which candidate it makes pass. RUN: the verdict table has exactly the PLAN's rows and
     thresholds; a doubt about a criterion goes into Deviations with a proposal
-    for a new PLAN, never into a re-scored, rounded, or reinterpreted row.
+    for a new PLAN, never into a re-scored, rounded, or reinterpreted row; a
+    failing pooled criterion gets its per-unit breakdown before the candidate
+    is called biased.
     LITERATURE: a threshold found in a paper is `proposed`, never `given`; it
     becomes a criterion only when a human confirms it in a PLAN.
 
@@ -102,7 +105,8 @@ P8. **Candidates are compared pairwise, the verdict is a vector, and a
     Vectors, Pairwise Dominance, Selection, Open Pairs; one per snapshot per
     phase; a final result is the selection of a COMPARISON of structurally
     different candidates on the final snapshot with no open pair left while
-    budget remains, checked by `{result_gate}`. RUN: reports only its own
+    budget remains, or at budget 0 with nothing selected the best available
+    candidate, reported as not passing; checked by `{result_gate}`. RUN: reports only its own
     vector and its Structure, and never ranks itself.
 
 P9. **Every criterion says how it is measured; cheap gates run first; the agent does not judge its own result.** A criterion is `mechanical` with its

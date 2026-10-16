@@ -30,14 +30,24 @@ artifacts/COMPARISON/rules.md:
   R4  section 5 `**Selected**:` names a listed RUN that passes every
       mechanical row, has no `not evaluated` row and is dominated by no
       candidate, and the sha256 of --submission equals that RUN's
-      `**Candidate sha256**:` (RUN section 3).
+      `**Candidate sha256**:` (RUN section 3). Or, only with --budget-left 0:
+      `**Selected**: none` and `**Best available**:` names a listed RUN with
+      no `not evaluated` row, dominated by no candidate, failing at least one
+      mechanical row, every fail with its mode (biased / imprecise) in the
+      RUN's Verdict and its criterion ID in section 5 `**Fails**:`, and the
+      submission is that RUN's candidate file. `none` without a best
+      available, or a best available while budget remains or the budget is
+      unknown, is refused with the next step: name each non-dominated
+      candidate's fail modes, then run a batch aimed at a fail mode or add a
+      structurally different candidate.
   R5  section 6 has a Status column with `open`, `closed by batch <id>`
       (a DATASET batch whose Justification has an `information →` target) or
       `unresolvable: <reason>`; every candidate the selected one does not
       dominate is in a pair with it; and no pair is `open` while
       --budget-left > 0 (or when --budget-left is not given: the gate fails
       closed). A reason about using fewer experiments or saving budget is not
-      a reason.
+      a reason. The pairing applies to the result candidate: the selected
+      RUN, or the best available one.
   R6  every RUN and COMPARISON file passes the structural checks of `cfs
       validate`, replicated from the kit's constraints.toml: one H1, an
       `**ID**:` of its kind, unique across files, every required numbered
@@ -53,14 +63,19 @@ the agent's. It runs the same checks, appends one JSON line to --witness and
 exits 0 to accept, 2 to refuse (the report goes to stderr), 1 on a usage
 error (nothing is written). The witness line:
 
-  {"time": ISO 8601 UTC, "gate": "result_gate", "version": "0.4.1",
+  {"time": ISO 8601 UTC, "gate": "result_gate", "version": "0.4.2",
    "gate_sha256": sha256 of this script, "verdict": "PASS" | "FAIL" | "ERROR",
    "violations": ["[Rk] ...", ...], "notes": [...], "submission": path,
    "submission_sha256": hex | null, "comparison": ID | null,
-   "selected": RUN ID | null, "budget_left": int | null,
+   "selection": "selected" | "best_available" | null,
+   "selected": RUN ID | null, "best_available": RUN ID | null,
+   "budget_left": int | null,
    "source": path | null, "source_sha256": hex | null}
 
 ERROR means the source or the submission could not be read; it refuses.
+"selection" says which kind of result the COMPARISON offers: a selected
+candidate (it passes the PLAN's mechanical criteria) or the best available one
+at budget 0 (it does not, and is never presented as passing).
 --source is in the acquisitions format of design_gate.py (JSONL calls with
 named `points`, or CSV with a `name` column): a record the agent does not
 write, typically the witness of `design_log.py hook`, whose points carry the
@@ -87,7 +102,7 @@ sys.path.insert(0, str(HERE))
 from design_gate import SourceError, load_source  # noqa: E402
 from design_log import load_log, prefix_hash, same_point  # noqa: E402
 
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 CONSTRAINTS = HERE.parent / "constraints.toml"
 SHA = re.compile(r"[0-9a-f]{64}")
 RESULTS = {"pass": "pass", "p": "pass", "fail": "fail", "f": "fail",
@@ -184,6 +199,12 @@ def sha256_file(path) -> str:
 def result(cell: str):
     """pass / fail / not evaluated, or None if the cell is none of them."""
     return RESULTS.get(plain(cell).lower())
+
+
+def fail_mode(cell: str):
+    """biased / imprecise if the Failure mode cell starts with one of them, else None."""
+    m = re.match(r"(biased|imprecise)\b", plain(cell).lower())
+    return m.group(1) if m else None
 
 
 # ── R6: structure, replicated from constraints.toml ─────────────
@@ -309,13 +330,14 @@ def load_run(path: Path, text: str) -> dict:
         c = next((k for k, h in enumerate(head) if h.startswith("criterion")), None)
         r = next((k for k, h in enumerate(head) if h == "result"), None)
         mb = next((k for k, h in enumerate(head) if h.startswith("measured by")), None)
+        fm = next((k for k, h in enumerate(head) if h.startswith("failure mode")), None)
         if c is not None and r is not None:
             run["verdict"] = []
             for row in tabs[0][1:]:
                 row = row + [""] * (len(head) - len(row))
                 crit = (ids_in(row[c], "criterion") or [plain(row[c])])[0]
                 mech = mb is None or plain(row[mb]).lower().startswith("mechanical")
-                run["verdict"].append((crit, row[r], mech))
+                run["verdict"].append((crit, row[r], mech, row[fm] if fm is not None else ""))
     return run
 
 
@@ -337,6 +359,9 @@ def load_comparison(path: Path, text: str) -> dict:
     comp["rows"] = [((ids_in(r[0], "run") or [plain(r[0])])[0], r[1:]) for r in t3[0][1:]] if t3 else []
     sel = field(sec.get("selection", ""), "Selected")
     comp["selected"] = None if sel is None else (ids_in(sel, "run") or [plain(sel).lower()])[0]
+    best = field(sec.get("selection", ""), "Best available")
+    comp["best"] = None if best is None else (ids_in(best, "run") or [plain(best).lower()])[0]
+    comp["fails"] = field(sec.get("selection", ""), "Fails") or ""
     t6 = tables(sec.get("open pairs", ""))
     comp["pairs_head"] = [plain(h).lower() for h in t6[0][0]] if t6 else None
     comp["pairs"] = t6[0][1:] if t6 else []
@@ -409,7 +434,8 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
     """(violations, notes, info). Raises SourceError if --source or --submission
     cannot be read."""
     fails, notes = [], []
-    info = {"comparison": None, "selected": None, "submission_sha256": None}
+    info = {"comparison": None, "selection": None, "selected": None, "best_available": None,
+            "submission_sha256": None}
 
     def bad(rule, msg):
         fails.append(f"[{rule}] {msg}")
@@ -523,13 +549,13 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
         if r["verdict"] is None:
             bad("R3", f"{r['path'].name}: section 9 has no Verdict table with `Criterion ID` and `Result` columns")
             continue
-        got = [c for c, _, _ in r["verdict"]]
+        got = [c for c, _, _, _ in r["verdict"]]
         if crit and got != crit:
             bad("R3", f"{r['path'].name}: Verdict rows are {', '.join(got) or 'none'}; the PLAN's criteria in order "
                       f"are {', '.join(crit)} (RUN rule 7)")
             continue
         vec = []
-        for c, cell, mech in r["verdict"]:
+        for c, cell, mech, _ in r["verdict"]:
             v = result(cell)
             if v is None:
                 bad("R3", f"{r['path'].name}: Verdict result `{plain(cell)}` for {c} is not pass, fail or "
@@ -553,41 +579,109 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
         if rid not in comp["candidates"]:
             bad("R3", f"{cn}: section 3 row {rid} is not a candidate of section 2")
 
-    # R4 — submission = selection
-    sel = comp["selected"]
+    # R4 — submission = selection (or, at budget 0, the best available candidate)
+    sel, best = comp["selected"], comp["best"]
     pure = {rid: [v for v, _ in vec] for rid, vec in vectors.items()
             if all(v in ("pass", "fail") for v, _ in vec)}
+    undominated = [rid for rid in comp["candidates"] if rid in vectors
+                   and not any(dominates(ov, pure[rid]) for o, ov in pure.items() if o != rid and rid in pure)]
+
+    def fails_of(rid):
+        r = by_id.get(rid)
+        return [(c, fail_mode(fm), plain(fm)) for c, cell, _, fm in (r["verdict"] or [])
+                if result(cell) == "fail"] if r else []
+
+    def step():
+        named = "; ".join((f"{rid} fails " + ", ".join(f"{c} ({txt if m else 'mode not named'})" for c, m, txt in fails_of(rid)))
+                          if fails_of(rid) else f"{rid} fails no row: select it"
+                          for rid in undominated) or "no candidate has a Verdict"
+        return ("this is not a stopping point. Next: (1) in the RUN of each non-dominated candidate, name the mode of "
+                "every failing criterion, biased or imprecise, and where (which units, which regime); for a criterion "
+                f"pooled over units give the per-unit breakdown (RUN rules 8, 12). Now: {named}. (2) Run a batch "
+                "whose justification is `information → fail mode <RUN ID> <criterion>: <where>`, or add a RUN of a "
+                "structurally different candidate. (3) Write the new RUNs and a COMPARISON on the larger snapshot "
+                "(COMPARISON rule 10)")
+
+    target = None
     if sel is None:
-        bad("R4", f"{cn}: section 5 has no `**Selected**: `<RUN ID>`` line")
-    elif not sel.startswith("cpt-"):
-        bad("R4", f"{cn}: nothing is selected (`{sel}`); no result can be submitted from this COMPARISON")
-        sel = None
-    elif sel not in comp["candidates"]:
-        bad("R4", f"{cn}: selected {sel} is not a candidate of section 2")
-        sel = None
-    if sel is not None:
-        info["selected"] = sel
-        r = by_id.get(sel)
-        vec = vectors.get(sel)
-        if vec is not None:
-            ne = [c for c, (v, _) in zip(crit, vec) if v == "not evaluated"]
-            fl = [c for c, (v, m) in zip(crit, vec) if m and v == "fail"]
-            if ne:
-                bad("R4", f"selected {sel} has `not evaluated` rows ({', '.join(ne)}) and cannot be selected "
-                          "(COMPARISON rule 2)")
-            if fl:
-                bad("R4", f"selected {sel} fails mechanical rows ({', '.join(fl)}); if no candidate passes every "
-                          "mechanical gate, nothing is selected (COMPARISON rule 4)")
-            for o, ov in pure.items():
-                if o != sel and sel in pure and dominates(ov, pure[sel]):
-                    bad("R4", f"selected {sel} is dominated by {o} (COMPARISON rule 3)")
+        bad("R4", f"{cn}: section 5 has no `**Selected**: `<RUN ID>`` line (or `**Selected**: none`)")
+    elif sel.startswith("cpt-"):
+        if best is not None and best.startswith("cpt-"):
+            bad("R4", f"{cn}: section 5 has both `**Selected**:` and `**Best available**:`; a best available "
+                      "candidate exists only when nothing is selected")
+        if sel not in comp["candidates"]:
+            bad("R4", f"{cn}: selected {sel} is not a candidate of section 2")
+        else:
+            target, info["selection"], info["selected"] = sel, "selected", sel
+            vec = vectors.get(sel)
+            if vec is not None:
+                ne = [c for c, (v, _) in zip(crit, vec) if v == "not evaluated"]
+                fl = [c for c, (v, m) in zip(crit, vec) if m and v == "fail"]
+                if ne:
+                    bad("R4", f"selected {sel} has `not evaluated` rows ({', '.join(ne)}) and cannot be selected "
+                              "(COMPARISON rule 2)")
+                if fl:
+                    bad("R4", f"selected {sel} fails mechanical rows ({', '.join(fl)}); if no candidate passes "
+                              "every mechanical gate, nothing is selected (COMPARISON rule 4)")
+                for o, ov in pure.items():
+                    if o != sel and sel in pure and dominates(ov, pure[sel]):
+                        bad("R4", f"selected {sel} is dominated by {o} (COMPARISON rule 3)")
+    elif best is None or not best.startswith("cpt-"):
+        if budget_left is None:
+            bad("R4", f"{cn}: nothing is selected and the remaining budget is unknown; pass --budget-left (0 when "
+                      f"the budget is spent). While budget remains, {step()}. At budget 0, name the result as "
+                      "`**Best available**: <RUN ID>` with its `**Fails**:` (COMPARISON rule 11)")
+        elif budget_left > 0:
+            bad("R4", f"{cn}: nothing is selected and {budget_left} batch(es) remain; {step()}")
+        else:
+            bad("R4", f"{cn}: nothing is selected and the budget is spent; name a non-dominated candidate with no "
+                      "`not evaluated` row as `**Best available**: <RUN ID>` and list each criterion it fails, "
+                      "with its mode, in `**Fails**:` (COMPARISON rule 11). Non-dominated: "
+                      f"{', '.join(undominated) or 'none'}")
+    else:
+        if budget_left is None:
+            bad("R4", f"{cn}: best available {best} is accepted only at budget 0 and the remaining budget is "
+                      "unknown; pass --budget-left")
+        elif budget_left > 0:
+            bad("R4", f"{cn}: best available {best} is offered with {budget_left} batch(es) left; a best available "
+                      f"result is accepted only at budget 0; {step()}")
+        if best not in comp["candidates"]:
+            bad("R4", f"{cn}: best available {best} is not a candidate of section 2")
+        else:
+            target, info["selection"], info["best_available"] = best, "best_available", best
+            vec = vectors.get(best)
+            if vec is not None:
+                ne = [c for c, (v, _) in zip(crit, vec) if v == "not evaluated"]
+                if ne:
+                    bad("R4", f"best available {best} has `not evaluated` rows ({', '.join(ne)}); only a candidate "
+                              "with a complete Verdict can be the best available (COMPARISON rule 11)")
+                for o, ov in pure.items():
+                    if o != best and best in pure and dominates(ov, pure[best]):
+                        bad("R4", f"best available {best} is dominated by {o}; the best available is a "
+                                  "non-dominated candidate (COMPARISON rule 11)")
+                if not any(m and v == "fail" for v, m in vec) and not ne:
+                    bad("R4", f"best available {best} passes every mechanical row; write it as `**Selected**:`")
+                for c, m, _ in fails_of(best):
+                    if m is None:
+                        bad("R4", f"best available {best} fails {c} without a Failure mode; write biased or "
+                                  "imprecise and where in its Verdict (RUN rule 8)")
+                    if c not in ids_in(comp["fails"], "criterion"):
+                        bad("R4", f"{cn}: section 5 `**Fails**:` does not list {c}, which best available {best} "
+                                  "fails; a best available result lists every criterion it fails with its mode")
+                if budget_left == 0:
+                    notes.append(f"note: the result is the best available candidate {best}, not a selection: it "
+                                 f"fails {', '.join(c for c, _, _ in fails_of(best))} and is never presented as "
+                                 "passing the PLAN's criteria")
+    if target is not None:
+        r = by_id.get(target)
+        what = "selected" if info["selection"] == "selected" else "best available"
         if r is not None:
             if r["sha"] is None or not SHA.fullmatch(r["sha"]):
                 bad("R4", f"{r['path'].name}: section 3 has no `**Candidate sha256**:` of 64 hex digits; the "
-                          "submission cannot be tied to the selected candidate")
+                          f"submission cannot be tied to the {what} candidate")
             elif r["sha"] != sub_sha:
-                bad("R4", f"the submission {Path(submission).name} has sha256 {sub_sha[:12]}…, the selected RUN "
-                          f"{sel} records {r['sha'][:12]}…: the submitted file is not the selected candidate")
+                bad("R4", f"the submission {Path(submission).name} has sha256 {sub_sha[:12]}…, the {what} RUN "
+                          f"{target} records {r['sha'][:12]}…: the submitted file is not the {what} candidate")
 
     # R5 — stopping rule
     head = comp["pairs_head"]
@@ -635,11 +729,11 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
         else:
             bad("R5", f"{cn}: pair {label} has status `{s or 'empty'}`; use `open`, `closed by batch <id>` or "
                       "`unresolvable: <why the remaining budget cannot separate it>`")
-    if info["selected"] and info["selected"] in pure:
-        s_vec = pure[info["selected"]]
+    if target is not None and target in pure:
+        what = "selected" if info["selection"] == "selected" else "best available"
         for o, ov in pure.items():
-            if o != info["selected"] and not dominates(s_vec, ov) and frozenset((o, info["selected"])) not in listed_pairs:
-                bad("R5", f"{cn}: {o} is not dominated by the selected {info['selected']} and the pair is not in "
+            if o != target and not dominates(pure[target], ov) and frozenset((o, target)) not in listed_pairs:
+                bad("R5", f"{cn}: {o} is not dominated by the {what} {target} and the pair is not in "
                           "section 6; list it with its status (COMPARISON rule 5)")
     for label in open_pairs:
         if budget_left is None:
@@ -687,7 +781,8 @@ def run_check(o):
 def hook(o) -> int:
     rec = {"time": dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds"), "gate": "result_gate",
            "version": VERSION, "gate_sha256": sha256_file(__file__), "verdict": None, "violations": [], "notes": [],
-           "submission": o["--submission"], "submission_sha256": None, "comparison": None, "selected": None,
+           "submission": o["--submission"], "submission_sha256": None, "comparison": None, "selection": None,
+           "selected": None, "best_available": None,
            "budget_left": o.get("--budget-left"), "source": o.get("--source"), "source_sha256": None}
     try:
         if o.get("--source"):

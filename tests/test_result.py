@@ -58,7 +58,8 @@ def source_jsonl(calls=(("e1", "e2"), ("e3", "e4"))) -> str:
 
 
 def run_md(rid, exps="e1, e2, e3, e4", structure="single-site", spec=SPEC_A, verdict=("pass", "pass", "pass"),
-           cand_sha=None, dataset=DS, drop=None, measured="mechanical") -> str:
+           cand_sha=None, dataset=DS, drop=None, measured="mechanical", modes=None) -> str:
+    modes = modes or ["none"] * len(CRIT)
     secs = {
         1: ("Unit", f"**Dataset**: `{dataset}`\n\n**Experiments**: {exps}\n\nSimulator data."),
         2: ("Procedure", "Least squares."),
@@ -71,7 +72,7 @@ def run_md(rid, exps="e1, e2, e3, e4", structure="single-site", spec=SPEC_A, ver
         8: ("Deviations", "None"),
         9: ("Verdict", "| Criterion ID | Measured | Threshold | Measured by | Result | Failure mode |\n"
                        "|---|---|---|---|---|---|\n"
-            + "".join(f"| `{c}` | 0 | 0 | {measured} | {v} | none |\n" for c, v in zip(CRIT, verdict))),
+            + "".join(f"| `{c}` | 0 | 0 | {measured} | {v} | {m} |\n" for c, v, m in zip(CRIT, verdict, modes))),
         10: ("Reproduction", "request.json"),
     }
     out, n = [], 0
@@ -85,7 +86,7 @@ def run_md(rid, exps="e1, e2, e3, e4", structure="single-site", spec=SPEC_A, ver
 
 def comp_md(cid, exps="e1, e2, e3, e4", cands=(A, B), rows=None, selected=A, pairs=((A, B, "closed by batch 2"),),
             columns=CRIT, supersedes="none", pairs_head="| Pair | Differing hypotheses (IDs) | Condition | Status |",
-            dataset=DS) -> str:
+            dataset=DS, best=None, fails=None) -> str:
     rows = rows if rows is not None else {A: ("pass", "pass", "pass"), B: ("pass", "pass", "fail")}
     cand = "".join(f"| `{r}` | {r} | 1 | starting candidate | — |\n" for r in cands)
     vec = "".join(f"| `{r}` | " + " | ".join(v) + " |\n" for r, v in rows.items())
@@ -97,6 +98,10 @@ def comp_md(cid, exps="e1, e2, e3, e4", cands=(A, B), rows=None, selected=A, pai
     else:
         open_pairs = "None"
     sel = f"**Selected**: `{selected}`" if selected and selected.startswith("cpt-") else f"**Selected**: {selected}"
+    if best:
+        sel += f"\n\n**Best available**: `{best}`"
+    if fails:
+        sel += f"\n\n**Fails**: {fails}"
     return ("---\ndescription: fixture comparison\nstatus: draft\n---\n\n"
             f"# COMPARISON — {cid}\n\n**ID**: `{cid}`\n\n"
             f"## 1. Snapshot\n\n**Dataset**: `{dataset}`\n\n**Experiments**: {exps}\n\n**Supersedes**: {supersedes}\n\n"
@@ -288,9 +293,9 @@ class TestR4Submission(Workspace):
         self.put("submission.txt", SUBMISSION + "edited after the RUN\n")
         self.assertFails("R4", "the submitted file is not the selected candidate")
 
-    def test_nothing_selected_fails_r4(self):
+    def test_nothing_selected_with_a_passing_candidate_says_select_it(self):
         self.put("comparisons/c2.md", comp_md("cpt-t-comparison-c2", selected="none"))
-        self.assertFails("R4", "nothing is selected (`none`)")
+        self.assertFails("R4", f"{A} fails no row: select it")
 
     def test_missing_selected_line_fails_r4(self):
         self.put("comparisons/c2.md", comp_md("cpt-t-comparison-c2").replace(f"**Selected**: `{A}`", "A wins."))
@@ -312,6 +317,123 @@ class TestR4Submission(Workspace):
     def test_missing_candidate_hash_fails_r4(self):
         self.put("runs/a.md", run_md(A).replace(f"**Candidate sha256**: `{sha(SUBMISSION)}`", "**Candidate sha256**: tbd"))
         self.assertFails("R4", "a.md: section 3 has no `**Candidate sha256**:` of 64 hex digits")
+
+
+QUALITY = CRIT[1]
+FAILS_A = f"`{QUALITY}` (biased: e3, e4 in the steep regime; the other units at the noise floor)"
+
+
+class TestNothingSelected(Workspace):
+    """No candidate passes: never a stopping point while budget remains; at budget 0 a best available result."""
+
+    def setUp(self):
+        super().setUp()
+        self.put("runs/a.md", run_md(A, verdict=("pass", "fail", "pass"),
+                                     modes=("none", "biased: e3, e4 in the steep regime", "none")))
+        self.put("runs/b.md", run_md(B, structure="two-site", spec=SPEC_B, verdict=("pass", "fail", "fail"),
+                                     modes=("none", "imprecise: b near its bound", "biased"),
+                                     cand_sha=sha("candidate b\n")))
+        self.rows = {A: ("pass", "fail", "pass"), B: ("pass", "fail", "fail")}
+
+    def comparison(self, **kw):
+        self.put("comparisons/c2.md", comp_md("cpt-t-comparison-c2", rows=kw.pop("rows", self.rows),
+                                              selected=kw.pop("selected", "none"), **kw))
+
+    def test_none_with_budget_left_is_refused_with_the_next_step(self):
+        self.comparison()
+        out = self.assertFails("R4", "nothing is selected and 3 batch(es) remain; this is not a stopping point. Next:")
+        self.assertIn(f"Now: {A} fails {QUALITY} (biased: e3, e4 in the steep regime).", out)
+        self.assertNotIn(f"{B} fails", out)                    # dominated by A: not a lead
+        self.assertIn("`information → fail mode <RUN ID> <criterion>: <where>`", out)
+        self.assertIn("or add a RUN of a structurally different candidate", out)
+
+    def test_none_names_a_missing_fail_mode(self):
+        self.put("runs/a.md", run_md(A, verdict=("pass", "fail", "pass")))
+        self.comparison()
+        self.assertIn(f"{A} fails {QUALITY} (mode not named)", self.assertFails("R4"))
+
+    def test_none_with_unknown_budget_fails_closed(self):
+        self.comparison()
+        out = self.assertFails("R4", "nothing is selected and the remaining budget is unknown; pass --budget-left",
+                               budget=None)
+        self.assertIn("At budget 0, name the result as `**Best available**: <RUN ID>`", out)
+
+    def test_none_at_budget_0_without_best_available_says_how_to_finish(self):
+        self.comparison()
+        self.assertFails("R4", f"nothing is selected and the budget is spent; name a non-dominated candidate with no "
+                               f"`not evaluated` row as `**Best available**: <RUN ID>`", budget="0")
+
+    def test_best_available_at_budget_0_is_accepted(self):
+        self.comparison(best=A, fails=FAILS_A)
+        code, out = self.gate(budget="0")
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"note: the result is the best available candidate {A}, not a selection: it fails {QUALITY} "
+                      "and is never presented as passing the PLAN's criteria", out)
+        self.assertEqual(out.strip().splitlines()[-1], "PASS")
+
+    def test_best_available_witness(self):
+        self.comparison(best=A, fails=FAILS_A)
+        wit = self.td / "w.jsonl"
+        r = subprocess.run([sys.executable, str(GATE), "hook", "--witness", str(wit)] + self.args(budget="0"),
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        w = json.loads(wit.read_text())
+        self.assertEqual((w["verdict"], w["selection"], w["best_available"], w["selected"]),
+                         ("PASS", "best_available", A, None))
+
+    def test_selected_witness_says_selected(self):
+        wit = self.td / "w.jsonl"
+        self.put("runs/a.md", run_md(A))
+        self.put("comparisons/c2.md", comp_md("cpt-t-comparison-c2", rows={A: ("pass",) * 3, B: self.rows[B]}))
+        r = subprocess.run([sys.executable, str(GATE), "hook", "--witness", str(wit)] + self.args(),
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        w = json.loads(wit.read_text())
+        self.assertEqual((w["selection"], w["selected"], w["best_available"]), ("selected", A, None))
+
+    def test_best_available_with_budget_left_is_refused(self):
+        self.comparison(best=A, fails=FAILS_A)
+        out = self.assertFails("R4", f"best available {A} is offered with 3 batch(es) left; a best available result "
+                                     "is accepted only at budget 0; this is not a stopping point. Next:")
+        code, out = self.gate(budget=None)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"best available {A} is accepted only at budget 0 and the remaining budget is unknown", out)
+
+    def test_best_available_dominated_is_refused(self):
+        self.put("submission.txt", "candidate b\n")
+        self.comparison(best=B, fails=f"`{QUALITY}` (imprecise); `{CRIT[2]}` (biased)")
+        self.assertFails("R4", f"best available {B} is dominated by {A}", budget="0")
+
+    def test_best_available_not_evaluated_is_refused(self):
+        self.put("runs/a.md", run_md(A, verdict=("pass", "fail", "not evaluated"),
+                                     modes=("none", "biased: e3, e4", "none")))
+        self.comparison(rows={A: ("pass", "fail", "n/e"), B: self.rows[B]}, best=A, fails=FAILS_A)
+        self.assertFails("R4", f"best available {A} has `not evaluated` rows ({CRIT[2]})", budget="0")
+
+    def test_best_available_must_list_its_fails(self):
+        self.comparison(best=A, fails="see RUN")
+        self.assertFails("R4", f"`**Fails**:` does not list {QUALITY}", budget="0")
+
+    def test_best_available_fail_needs_a_mode(self):
+        self.put("runs/a.md", run_md(A, verdict=("pass", "fail", "pass")))
+        self.comparison(best=A, fails=FAILS_A)
+        self.assertFails("R4", f"best available {A} fails {QUALITY} without a Failure mode", budget="0")
+
+    def test_best_available_that_passes_must_be_selected(self):
+        self.put("runs/a.md", run_md(A))
+        self.comparison(rows={A: ("pass",) * 3, B: self.rows[B]}, best=A, fails="none")
+        self.assertFails("R4", f"best available {A} passes every mechanical row; write it as `**Selected**:`",
+                         budget="0")
+
+    def test_selected_and_best_available_together_are_refused(self):
+        self.put("runs/a.md", run_md(A))
+        self.comparison(rows={A: ("pass",) * 3, B: self.rows[B]}, selected=A, best=B)
+        self.assertFails("R4", "has both `**Selected**:` and `**Best available**:`")
+
+    def test_best_available_submission_must_match(self):
+        self.put("submission.txt", "something else\n")
+        self.comparison(best=A, fails=FAILS_A)
+        self.assertFails("R4", "the submitted file is not the best available candidate", budget="0")
 
 
 class TestR5Stopping(Workspace):
@@ -501,7 +623,7 @@ class TestHook(Workspace):
         self.assertEqual(out.strip(), "PASS")
         self.assertEqual(len(wit), 1)
         w = wit[0]
-        self.assertEqual((w["verdict"], w["violations"], w["gate"], w["version"]), ("PASS", [], "result_gate", "0.4.1"))
+        self.assertEqual((w["verdict"], w["violations"], w["gate"], w["version"]), ("PASS", [], "result_gate", "0.4.2"))
         self.assertEqual(w["submission_sha256"], sha(SUBMISSION))
         self.assertEqual((w["comparison"], w["selected"], w["budget_left"]), ("cpt-t-comparison-c2", A, 3))
         self.assertEqual(w["source_sha256"], hashlib.sha256((self.td / "acquisitions.jsonl").read_bytes()).hexdigest())

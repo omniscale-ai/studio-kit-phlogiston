@@ -25,13 +25,13 @@
    selection cites the rule line that decided it. If no candidate passes every
    mechanical gate, nothing is selected and the COMPARISON says so; a selection
    is not forced to have a winner. Section 5 states it as `**Selected**:` with
-   the RUN ID, or `none`.
+   the RUN ID, or `none` (then rules 10 and 11 say what comes next).
 5. **Open pairs are the only source of discrimination targets.** A
    non-dominated pair the snapshot cannot separate is written with the
    hypotheses that differ between its members and the condition that would
    separate them. The next batch's `information →` justification must name an
-   open pair from the latest COMPARISON; a discrimination batch without one is
-   unjustified. Every candidate the selected one does not dominate forms a
+   open pair from the latest COMPARISON, or, when it selects nothing, a fail
+   mode (rule 10); a discrimination batch without one is unjustified. Every candidate the selected one does not dominate forms a
    pair with it. Each pair has a Status: `open`; `closed by batch <id>` once a
    batch whose `information →` justification names the pair is in the
    snapshot; or `unresolvable: <reason>`, where the reason says why the
@@ -47,6 +47,7 @@
 8. **Stop only when nothing separable is left.** While a pair is `open` and
    budget remains, the next step is the batch that separates it, then new
    RUNs and a new COMPARISON on the larger snapshot, not a final result.
+   Likewise while nothing is selected and budget remains (rule 10).
    Fewer experiments, saving budget or efficiency is never a reason to stop
    while an open pair is separable within the budget. One candidate is not a
    selection: a final result needs at least two candidates of different
@@ -56,6 +57,28 @@
    result the gate refuses is not presented; fix what it names (usually: run
    the separating batch, write the missing RUN, redo the COMPARISON on the
    final snapshot) and run the gate again.
+10. **Nothing selected is not a stopping point while budget remains.** When
+    the latest COMPARISON selects `none` and budget is left, the next step is
+    mandatory: (1) in the RUN of every non-dominated candidate, name the mode
+    of each criterion it fails, biased or imprecise, and where (which units,
+    which regime), with the per-unit breakdown of a pooled criterion (RUN
+    rules 8, 12); (2) run a batch whose justification is
+    `information → fail mode <RUN ID> <criterion>: <where>`, aimed at that
+    failure (more points in the regime where the residuals concentrate, a
+    condition where a suspected missing term would show), or add a RUN of a
+    structurally different candidate; (3) write the new RUNs and a COMPARISON
+    on the larger snapshot. A failing criterion is never a reason to stop and
+    never a reason to change the criterion (PLAN rule 11).
+11. **At budget 0 with nothing selected, the result is the best available
+    candidate.** Section 5 keeps `**Selected**: none` and adds
+    `**Best available**:` with a non-dominated candidate that has no
+    `not evaluated` row, and `**Fails**:` listing every criterion it fails
+    with its mode and where (`` `<criterion ID>` (biased: e7, e9 in the steep
+    regime) ``). Among several, the PLAN selection rule decides, applied to
+    the rows they pass. The submission is that RUN's candidate file. A best
+    available result is reported as such: it does not pass the PLAN's
+    criteria and is never presented as if it did. It is accepted only when
+    the budget is spent.
 
 ## Result gate (`{result_gate}`)
 
@@ -79,8 +102,8 @@ tell whether budget remains.
 | R1 | exactly one COMPARISON, not superseded, is on the final snapshot: its `**Dataset**:` is the DATASET ID and its `**Experiments**:` are exactly the experiments acquired; one on an older snapshot does not count (rule 1) |
 | R2 | it lists at least two candidates; every one has a RUN file on the same snapshot; every RUN on that snapshot is listed; at least two have different `**Structure**:` and different Candidate Specs (rule 8, RUN rule 11) |
 | R3 | section 3 columns are the PLAN's criterion IDs in order, each RUN's Verdict has exactly those rows, and every cell equals the RUN's result (rule 2) |
-| R4 | `**Selected**:` names a candidate that passes every mechanical row, has no `not evaluated` row, is dominated by no candidate, and whose `**Candidate sha256**:` equals the sha256 of the submitted file (rules 2, 3, 4, 9) |
-| R5 | section 6 has a Status for every pair; every candidate the selected one does not dominate is paired with it; `closed by batch <id>` names a DATASET batch with an `information →` justification; `unresolvable:` gives a reason that is not about using fewer experiments; and no pair is `open` while budget remains (rules 5, 8) |
+| R4 | `**Selected**:` names a candidate that passes every mechanical row, has no `not evaluated` row, is dominated by no candidate, and whose `**Candidate sha256**:` equals the sha256 of the submitted file (rules 2, 3, 4, 9); or, only at `--budget-left 0`, `**Selected**: none` with a `**Best available**:` candidate that has no `not evaluated` row, is dominated by no candidate, fails at least one mechanical row, gives every fail its mode in its Verdict and in `**Fails**:`, and is the submitted file (rule 11). `none` with budget left or unknown is refused with the next step of rule 10 |
+| R5 | section 6 has a Status for every pair; every candidate the result candidate (selected or best available) does not dominate is paired with it; `closed by batch <id>` names a DATASET batch with an `information →` justification; `unresolvable:` gives a reason that is not about using fewer experiments; and no pair is `open` while budget remains (rules 5, 8) |
 | R6 | every RUN and COMPARISON passes the structural checks of `cfs validate` (headings, numbering, `**ID**:`, unique IDs), replicated from `constraints.toml` |
 
 Dominance in R4 and R5 is rule 3 on the pass / fail vectors; a candidate with
@@ -93,7 +116,8 @@ the design log hook. Right before accepting a final result the trusted party
 agent's) runs `{result_gate} hook --witness <result_witness.jsonl> <the same
 options>`. The hook appends one JSON line (time, gate version and sha256,
 verdict PASS / FAIL / ERROR, violations, notes, submission path and sha256,
-COMPARISON and selected RUN, budget left, source and its sha256) and exits 0
+COMPARISON, `selection` (`selected` or `best_available`) with the selected or
+best available RUN, budget left, source and its sha256) and exits 0
 to accept, 2 to refuse (report on stderr), 1 on a usage error. The witness is
 written by the hook only; the agent never edits it.
 
@@ -104,7 +128,7 @@ written by the hook only; the agent never edits it.
 | 1. Snapshot | P1 origin composition of the snapshot |
 | 3. Criterion Vectors | P7 exactly the PLAN's criteria; P9 `not evaluated` rows excluded from selection |
 | 4. Pairwise Dominance | P8 pairwise, no composite score |
-| 5. Selection | P6 tie threshold then fewer parameters; P8 a ranking never replaces a batch; `**Selected**:` checked against the submission by `{result_gate}` |
+| 5. Selection | P6 tie threshold then fewer parameters; P8 a ranking never replaces a batch; `**Selected**:` (or, at budget 0, `**Best available**:` with `**Fails**:`) checked against the submission by `{result_gate}` |
 | 6. Open Pairs | P5 the `information →` targets of the next batch; P8 Status, and no final result while a pair is open and budget remains |
 | 7. Hypothesis Status Updates | P11 statuses by ID with evidence |
 | 8. Approval | P12 person, date, feedback verbatim |

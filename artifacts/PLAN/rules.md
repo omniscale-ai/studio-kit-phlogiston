@@ -34,9 +34,9 @@
    phases and each phase type has its own hard call limit for every tool. The
    PLAN lists both, and a phase that reaches its limit analyses what it has
    instead of calling again. Unspent budget is not a saving: the run stops
-   with a result only when the final COMPARISON has no `open` pair or the
-   budget is spent, and only after `{result_gate}` PASS (COMPARISON rules 8,
-   9).
+   with a result only when the final COMPARISON has no `open` pair, selects
+   a candidate, or the budget is spent, and only after `{result_gate}` PASS
+   (COMPARISON rules 8-11). A failing criterion is not a stop condition.
 8. **The phase sequence is the skeleton.** PRE-1, then per cycle Model
    Refinement and Design of Experiments with Mechanism Discrimination inserted
    after the first cycle, then Final Model Formulation and Report. Gates and
@@ -50,6 +50,29 @@
     fit tool's outputs, the DATASET and the PLAN itself. A criterion that
     nothing in the run can compute and no named human judges does not belong
     in the table.
+11. **A criterion changes only by revision, for a measurement reason.** The
+    criteria are frozen when the first phase starts (P7). A threshold that
+    turns out wrong is changed only in a new PLAN with a new ID, whose
+    section 9 states the reason in terms of the measurement (the noise model,
+    the sensitivity of the observable in some regime, what the pooled metric
+    weights) and never in terms of which candidate it makes pass; it names
+    the criterion, the old and new threshold, and the RUN evidence. The
+    revision is recorded in section 11 with who approved it (in an autonomous
+    run with pre-approved gates: `revision by the agent, <date>`, so a reader
+    can see it). Every RUN on the final snapshot is re-judged under the new
+    PLAN; verdicts under the old PLAN stand as written. A revision made after
+    the candidates' verdicts are known is suspect by default: it is
+    acceptable only if its reason would have been given before any RUN.
+12. **Every threshold is attainable by a correct model before the first
+    batch.** For each mechanical criterion with a threshold on data, section
+    9 states its Attainability: what a correct candidate would score under the
+    stated noise model, with the parameter uncertainty a fit to that noise
+    leaves, computed or simulated (for example, the distribution of the pooled
+    metric for the true structure fitted to noise-only replicates), and that
+    the threshold admits it with margin. A pooled metric says how much a
+    single unit in a highly sensitive regime can move it; if one unit can fail
+    a correct model, the criterion is restated (per unit, robust, or weighted
+    by the noise in that regime) before approval, not after.
 
 ## Where the principles land in a PLAN
 
@@ -61,5 +84,5 @@
 | 6. Phase Sequence | P4 which phases may spend real experiments; P12 gates |
 | 7. Experiment Design Policy | P5 justification types and design tool |
 | 8. Hypothesis Space | P6 parameters added and applicability, selection rule declared here and executed in a COMPARISON; P8 pairwise, no composite score; P11 status register, updated only from a COMPARISON |
-| 9. Verdict Criteria | P7 agreed, argued, frozen; P9 how measured, listing order |
+| 9. Verdict Criteria | P7 agreed, argued, frozen, attainable (rule 12), revised only by a new PLAN (rule 11); P9 how measured, listing order |
 | 11. Approval | P3 and P7 confirmed explicitly; literature mode shown and confirmed at Approval; P12 |
