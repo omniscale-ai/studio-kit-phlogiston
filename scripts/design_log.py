@@ -6,6 +6,7 @@
             --design-method '<tool, criterion, seed>' | 'manual: <reason>'
     python3 scripts/design_log.py hook --log <design_log.jsonl> --witness <design_witness.jsonl>
             (--points-key <dotted key into tool_input> | --points <json or file>) [--tool <name>]
+            [--require-analysis [--free-batches N] [--runs <dir>] [--comparisons <dir>]]
 
 `append` writes one entry: seq, prev (sha256 of the previous line), written_at
 (UTC, taken from the clock, not from the caller), batch, phase, points,
@@ -23,6 +24,17 @@ design_head, points). Each witness point carries the executed conditions as
 passed and the `name` of the registered point it was matched to, also when
 the tool input is unnamed (witnesses before kit 0.4.1 kept the tool's label,
 or null). Exit 0 admit, 2 block (reason on stderr), 1 usage error.
+
+With --require-analysis (off by default) the hook also checks that the run is
+sequential: a call that starts a new batch is admitted only if the previous
+batch is analysed, i.e. a RUN in --runs lists every experiment of that batch in
+its `**Experiments**:` and, when that batch is the second or later, so does a
+COMPARISON in --comparisons. The first --free-batches batches (default 1) start
+without it. --runs and --comparisons default to `runs/` and `comparisons/` next
+to the log. The admitted call's witness record then carries `analysed`:
+{batch, runs, comparisons} with the IDs that covered the previous batch. This
+is the mechanical form of RUN rule 10 and COMPARISON rule 5: a batch's
+justification comes from the latest RUN and COMPARISON.
 """
 from __future__ import annotations
 
@@ -318,9 +330,61 @@ def read_json_arg(s: str):
     return json.loads(s if s[:1] in "[{" else Path(s).read_text(encoding="utf-8"))
 
 
-def admit(log, witness, points, tool="") -> str:
+def witness_names(w: dict, entry) -> list:
+    """Names of a witness record's points: as recorded, or (old witnesses) matched to the entry."""
+    free = list(entry["points"]) if entry else []
+    out = []
+    for q in norm_points(w.get("points")):
+        k = next((k for k, x in enumerate(free) if same_point(x["conditions"], q["conditions"])), None)
+        reg = free.pop(k)["name"] if k is not None else None
+        out.append(q["name"] or reg)
+    return [n for n in out if n]
+
+
+def check_analysis(entries, records, n, analysis) -> dict:
+    """The previous batch is analysed before the batch of entry n starts; returns the evidence.
+    Raises PermissionError naming what to write."""
+    from result_gate import load_comparison, load_run, read      # lazy: only with --require-analysis
+    started = []
+    for w in records:
+        if w.get("design_lines") not in started:
+            started.append(w.get("design_lines"))
+    if n in started or len(started) < analysis["free"] or not started:
+        return {}
+    k = started[-1]
+    entry = entries[k - 1] if isinstance(k, int) and 0 < k <= len(entries) else None
+    names = set()
+    for w in records:
+        if w.get("design_lines") == k:
+            names.update(witness_names(w, entry))
+    batch = entry["batch"] if entry else f"of design-log line {k}"
+
+    def covering(d, loader):
+        out, p = [], Path(d)
+        for f in sorted(p.glob("*.md")) if p.is_dir() else []:
+            text = read(f)
+            doc = loader(f, text) if text is not None else None
+            if doc and doc["experiments"] is not None and names <= set(doc["experiments"]):
+                out.append(doc["id"] or f.name)
+        return out
+    runs = covering(analysis["runs"], load_run)
+    need_comp = len(started) >= 2
+    comps = covering(analysis["comparisons"], load_comparison) if need_comp else []
+    missing = ([f"a RUN in {analysis['runs']}"] if not runs else []) + \
+              ([f"a COMPARISON in {analysis['comparisons']}"] if need_comp and not comps else [])
+    if missing:
+        raise PermissionError(
+            f"batch {batch} is not analysed yet: write {' and '.join(missing)} whose `**Experiments**:` include "
+            f"{', '.join(sorted(names)) or 'its experiments'}, then call again. A batch is run to be analysed; the "
+            "next batch is designed from the latest RUN and COMPARISON (RUN rule 10, COMPARISON rule 5). The first "
+            f"{analysis['free']} batch(es) start without analysis (--free-batches)")
+    return {"batch": entry["batch"] if entry else None, "runs": runs, "comparisons": comps}
+
+
+def admit(log, witness, points, tool="", analysis=None) -> str:
     """Admit one experiment call or raise PermissionError with the reason.
-    On admission append a witness record and return it."""
+    On admission append a witness record and return it. `analysis` is None or
+    {"runs": dir, "comparisons": dir, "free": N} (--require-analysis)."""
     if not Path(log).is_file():
         raise PermissionError(f"no design log at {log}: append the batch with design_log.py append before the call (P5)")
     lines, entries, probs = load_log(log)
@@ -330,7 +394,7 @@ def admit(log, witness, points, tool="") -> str:
         raise PermissionError("design log is empty: append the batch before the call (P5)")
     n, open_e = len(lines), entries[-1]
     pts = norm_points(points)
-    used = []
+    used, records = [], []
     wp = Path(witness)
     if wp.is_file():
         for ln in raw_lines(wp):
@@ -338,6 +402,7 @@ def admit(log, witness, points, tool="") -> str:
                 w = json.loads(ln)
             except json.JSONDecodeError:
                 raise PermissionError(f"witness {witness} has a line that is not JSON; it is written by this hook only")
+            records.append(w)
             if w.get("design_lines") == n and w.get("design_head") == prefix_hash(lines, n):
                 used += [q["conditions"] for q in norm_points(w.get("points"))]
     free = list(open_e["points"])
@@ -357,8 +422,11 @@ def admit(log, witness, points, tool="") -> str:
             raise PermissionError(
                 f"point {json.dumps(p['conditions'], sort_keys=True)} is not an unused point of the latest design-log "
                 f"entry (seq {n}, batch {open_e['batch']}); append an entry for it first (P5)")
+    evidence = check_analysis(entries, records, n, analysis) if analysis else {}
     rec = {"time": now_iso(), "tool": tool, "design_lines": n, "design_head": prefix_hash(lines, n),
-           "points": [{"name": n, "conditions": p["conditions"]} for n, p in zip(matched, pts)]}
+           "points": [{"name": nm, "conditions": p["conditions"]} for nm, p in zip(matched, pts)]}
+    if evidence:
+        rec["analysed"] = evidence
     line = json.dumps(rec, ensure_ascii=False, separators=(", ", ": "))
     with open(wp, "a", encoding="utf-8") as f:
         f.write(line + "\n")
@@ -387,6 +455,8 @@ def main(argv=None, stdin=None) -> int:
         print(__doc__)
         return 1
     cmd = argv.pop(0)
+    require = cmd == "hook" and "--require-analysis" in argv
+    argv = [a for a in argv if not (cmd == "hook" and a == "--require-analysis")]
     try:
         o = opts(argv)
     except ValueError:
@@ -406,16 +476,25 @@ def main(argv=None, stdin=None) -> int:
         print(line)
         return 0
     if "--log" not in o or "--witness" not in o or ("--points-key" in o) == ("--points" in o) \
-            or set(o) - {"--log", "--witness", "--points-key", "--points", "--tool"}:
+            or set(o) - {"--log", "--witness", "--points-key", "--points", "--tool", "--free-batches", "--runs",
+                         "--comparisons"} \
+            or (not require and {"--free-batches", "--runs", "--comparisons"} & set(o)) \
+            or not re.fullmatch(r"\d+", o.get("--free-batches", "1")):
         print(__doc__)
         return 1
+    analysis = None
+    if require:
+        base = Path(o["--log"]).parent
+        analysis = {"runs": o.get("--runs", str(base / "runs")),
+                    "comparisons": o.get("--comparisons", str(base / "comparisons")),
+                    "free": int(o.get("--free-batches", "1"))}
     try:
         if "--points" in o:
             points, tool = read_json_arg(o["--points"]), o.get("--tool", "")
         else:
             payload = json.load(stdin or sys.stdin)
             points, tool = dig(payload.get("tool_input") or {}, o["--points-key"]), payload.get("tool_name", "")
-        admit(o["--log"], o["--witness"], points, o.get("--tool", tool))
+        admit(o["--log"], o["--witness"], points, o.get("--tool", tool), analysis)
     except (PermissionError, KeyError, ValueError, OSError) as exc:
         msg = f"cannot read the conditions at {exc}" if isinstance(exc, KeyError) else str(exc)
         print(f"design_log hook: call blocked: {msg}", file=sys.stderr)

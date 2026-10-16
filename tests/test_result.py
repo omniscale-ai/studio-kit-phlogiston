@@ -86,7 +86,7 @@ def run_md(rid, exps="e1, e2, e3, e4", structure="single-site", spec=SPEC_A, ver
 
 def comp_md(cid, exps="e1, e2, e3, e4", cands=(A, B), rows=None, selected=A, pairs=((A, B, "closed by batch 2"),),
             columns=CRIT, supersedes="none", pairs_head="| Pair | Differing hypotheses (IDs) | Condition | Status |",
-            dataset=DS, best=None, fails=None) -> str:
+            dataset=DS, best=None, fails=None, not_separable=None) -> str:
     rows = rows if rows is not None else {A: ("pass", "pass", "pass"), B: ("pass", "pass", "fail")}
     cand = "".join(f"| `{r}` | {r} | 1 | starting candidate | — |\n" for r in cands)
     vec = "".join(f"| `{r}` | " + " | ".join(v) + " |\n" for r, v in rows.items())
@@ -102,6 +102,8 @@ def comp_md(cid, exps="e1, e2, e3, e4", cands=(A, B), rows=None, selected=A, pai
         sel += f"\n\n**Best available**: `{best}`"
     if fails:
         sel += f"\n\n**Fails**: {fails}"
+    if not_separable is not None:
+        sel += f"\n\n**Not separable because**: {not_separable}"
     return ("---\ndescription: fixture comparison\nstatus: draft\n---\n\n"
             f"# COMPARISON — {cid}\n\n**ID**: `{cid}`\n\n"
             f"## 1. Snapshot\n\n**Dataset**: `{dataset}`\n\n**Experiments**: {exps}\n\n**Supersedes**: {supersedes}\n\n"
@@ -183,6 +185,10 @@ class TestPass(Workspace):
                                               rows={A: ("p", "p", "p"), B: ("pass", "pass", "fail")}))
         code, out = self.gate()
         self.assertEqual(code, 0, out)
+
+    def test_empty_field_does_not_take_the_next_line(self):
+        self.assertEqual(result_gate.field("**Selected**:\n\nFewer parameters.\n", "Selected"), "")
+        self.assertEqual(result_gate.field("- **Selected**: `cpt-x-run-a`  \n", "Selected"), "`cpt-x-run-a`")
 
     def test_names(self):
         self.assertEqual(result_gate.names("`e1`, e2–e4; x07..x09, b-1"),
@@ -341,11 +347,16 @@ class TestNothingSelected(Workspace):
 
     def test_none_with_budget_left_is_refused_with_the_next_step(self):
         self.comparison()
-        out = self.assertFails("R4", "nothing is selected and 3 batch(es) remain; this is not a stopping point. Next:")
+        out = self.assertFails("R4", "nothing is selected and 3 batch(es) remain; this is not a stopping point, and "
+                                     "spending the budget is never a route to a result. Either (A) analyse and probe")
+        self.assertIn("Or (B) hand in the best available candidate now: `**Best available**: <RUN ID>`", out)
+        self.assertIn("`**Not separable because**: <why no batch within the remaining budget would change the "
+                      "selection>`", out)
         self.assertIn(f"Now: {A} fails {QUALITY} (biased: e3, e4 in the steep regime).", out)
         self.assertNotIn(f"{B} fails", out)                    # dominated by A: not a lead
         self.assertIn("`information → fail mode <RUN ID> <criterion>: <where>`", out)
         self.assertIn("or add a RUN of a structurally different candidate", out)
+        self.assertIn("Design one batch from that diagnosis", out)
 
     def test_none_names_a_missing_fail_mode(self):
         self.put("runs/a.md", run_md(A, verdict=("pass", "fail", "pass")))
@@ -354,9 +365,10 @@ class TestNothingSelected(Workspace):
 
     def test_none_with_unknown_budget_fails_closed(self):
         self.comparison()
-        out = self.assertFails("R4", "nothing is selected and the remaining budget is unknown; pass --budget-left",
+        out = self.assertFails("R4", "nothing is selected and the remaining budget is unknown (pass --budget-left",
                                budget=None)
-        self.assertIn("At budget 0, name the result as `**Best available**: <RUN ID>`", out)
+        self.assertIn("Or (B) hand in the best available candidate now", out)
+        self.assertIn("At budget 0 the `**Not separable because**:` line is optional", out)
 
     def test_none_at_budget_0_without_best_available_says_how_to_finish(self):
         self.comparison()
@@ -391,13 +403,52 @@ class TestNothingSelected(Workspace):
         w = json.loads(wit.read_text())
         self.assertEqual((w["selection"], w["selected"], w["best_available"]), ("selected", A, None))
 
-    def test_best_available_with_budget_left_is_refused(self):
+    REASON = ("the residuals of e3, e4 come from the steep regime; every condition still allowed lies in it or at "
+              "the noise floor, where both candidates predict the same within σ")
+
+    def assertBothPaths(self, out):
+        self.assertIn("Either (A) analyse and probe", out)
+        self.assertIn("Or (B) hand in the best available candidate now", out)
+
+    def test_best_available_with_budget_left_and_a_reason_is_accepted(self):
+        self.comparison(best=A, fails=FAILS_A, not_separable=self.REASON)
+        wit = self.td / "w.jsonl"
+        r = subprocess.run([sys.executable, str(GATE), "hook", "--witness", str(wit)] + self.args(budget="3"),
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"not separable because: {self.REASON}", r.stdout)
+        w = json.loads(wit.read_text())
+        self.assertEqual((w["verdict"], w["selection"], w["best_available"], w["budget_left"]),
+                         ("PASS", "best_available", A, 3))
+
+    def test_best_available_with_a_reason_and_unknown_budget_is_accepted(self):
+        self.comparison(best=A, fails=FAILS_A, not_separable=self.REASON)
+        self.assertEqual(self.gate(budget=None)[0], 0)
+
+    def test_best_available_with_budget_left_without_a_reason_is_refused(self):
         self.comparison(best=A, fails=FAILS_A)
-        out = self.assertFails("R4", f"best available {A} is offered with 3 batch(es) left; a best available result "
-                                     "is accepted only at budget 0; this is not a stopping point. Next:")
+        out = self.assertFails("R4", f"best available {A} is offered while 3 batch(es) remain, without a "
+                                     "`**Not separable because**:` reason;")
+        self.assertBothPaths(out)
         code, out = self.gate(budget=None)
         self.assertEqual(code, 1, out)
-        self.assertIn(f"best available {A} is accepted only at budget 0 and the remaining budget is unknown", out)
+        self.assertIn(f"best available {A} is offered while the remaining budget is unknown, without a", out)
+
+    def test_best_available_with_an_empty_reason_is_refused(self):
+        self.comparison(best=A, fails=FAILS_A, not_separable="")
+        self.assertBothPaths(self.assertFails("R4", "without a `**Not separable because**:` reason"))
+
+    def test_saving_budget_is_not_a_reason(self):
+        for why in ("to save budget", "it finishes with fewer experiments", "saving the remaining batches"):
+            self.comparison(best=A, fails=FAILS_A, not_separable=why)
+            out = self.assertFails("R4", f"best available {A}: `{why}` is not a reason why the remaining budget "
+                                         "cannot change the selection;")
+            self.assertBothPaths(out)
+            self.assertNotIn("note: the result is the best available", out)
+
+    def test_at_budget_0_the_reason_stays_optional(self):
+        self.comparison(best=A, fails=FAILS_A)
+        self.assertEqual(self.gate(budget="0")[0], 0)
 
     def test_best_available_dominated_is_refused(self):
         self.put("submission.txt", "candidate b\n")
@@ -604,8 +655,107 @@ class TestHookWitnessAsSource(Workspace):
         self.assertEqual(code, 2)
         self.assertIn("not valid", out)
 
+    def test_require_analysis_accepts_an_analysed_sequence(self):
+        code, out = self.gate("--require-analysis", **{"--source": "design_witness.jsonl"})
+        self.assertEqual(code, 0, out)
+
+    def test_require_analysis_refuses_a_burned_sequence(self):
+        (self.td / "runs/a0.md").unlink()                    # batch 1 was never analysed on its own
+        self.put("comparisons/c1.md", comp_md("cpt-t-comparison-c1", exps="e1, e2", cands=(A,),
+                                              rows={A: ("pass",) * 3}, selected=A, pairs=()))
+        code, out = self.gate("--require-analysis", **{"--source": "design_witness.jsonl"})
+        self.assertEqual(code, 1, out)
+        self.assertEqual(self.rules(out), {"R7"}, out)
+        self.assertIn("[R7] batch 1 (e2, e1) is not covered by a RUN on an intermediate snapshot", out)
+        self.assertEqual(self.gate(**{"--source": "design_witness.jsonl"})[0], 0)       # off by default
+
+    def test_require_analysis_without_source_reads_dataset_batches(self):
+        (self.td / "runs/a0.md").unlink()
+        code, out = self.gate("--require-analysis", source=False)
+        self.assertIn("[R7] batch 1 (e1, e2) is not covered", out)
+        self.assertEqual(code, 1)
+
     def test_design_log_without_source_is_a_usage_error(self):
         self.assertEqual(self.gate(source=False, **{"--design-log": "design_log.jsonl"})[0], 2)
+
+
+class TestHookRequireAnalysis(Workspace):
+    """design_log.py hook --require-analysis: a new batch starts only after the previous one is analysed."""
+    BATCHES = {"1": {"e1": {"x": 0.0}, "e2": {"x": 1.0}}, "2": {"e3": {"x": 2.0}, "e4": {"x": 3.0}},
+               "3": {"e5": {"x": 4.0}}}
+
+    def setUp(self):
+        super().setUp()
+        self.log, self.wit = self.td / "design_log.jsonl", self.td / "design_witness.jsonl"
+        for d in ("r", "c"):
+            (self.td / d).mkdir()
+
+    def register(self, batch):
+        design_log.append_entry(self.log, batch, "P", self.BATCHES[batch], "variance → a", "manual: test")
+
+    def call(self, batch, *extra, flag=True, points=None):
+        pts = points or [dict(c) for c in self.BATCHES[batch].values()]
+        args = ["hook", "--log", str(self.log), "--witness", str(self.wit), "--points", json.dumps(pts)]
+        if flag:
+            args += ["--require-analysis", "--runs", str(self.td / "r"), "--comparisons", str(self.td / "c")]
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "design_log.py")] + args + list(extra),
+                           capture_output=True, text=True)
+        return r.returncode, r.stderr
+
+    def last_witness(self):
+        return json.loads(self.wit.read_text().splitlines()[-1])
+
+    def test_next_batch_waits_for_the_run_and_comparison_of_the_previous(self):
+        self.register("1")
+        self.assertEqual(self.call("1")[0], 0)                                   # first batch is free
+        self.register("2")
+        code, err = self.call("2")
+        self.assertEqual(code, 2)
+        self.assertIn(f"batch 1 is not analysed yet: write a RUN in {self.td / 'r'} whose `**Experiments**:` include "
+                      "e1, e2, then call again", err)
+        self.put("r/a.md", run_md(A, exps="e1, e2"))
+        self.assertEqual(self.call("2")[0], 0, )
+        self.assertEqual(self.last_witness()["analysed"], {"batch": "1", "runs": [A], "comparisons": []})
+        self.register("3")
+        code, err = self.call("3")
+        self.assertEqual(code, 2)
+        self.assertIn(f"write a RUN in {self.td / 'r'} and a COMPARISON in {self.td / 'c'} whose `**Experiments**:` "
+                      "include e3, e4", err)
+        self.put("r/b.md", run_md(B, structure="two-site", spec=SPEC_B))
+        code, err = self.call("3")
+        self.assertIn(f"write a COMPARISON in {self.td / 'c'} whose", err)
+        self.put("c/c2.md", comp_md("cpt-t-comparison-c2"))
+        self.assertEqual(self.call("3")[0], 0)
+        self.assertEqual(self.last_witness()["analysed"],
+                         {"batch": "2", "runs": [B], "comparisons": ["cpt-t-comparison-c2"]})
+
+    def test_free_batches(self):
+        self.register("1")
+        self.call("1", "--free-batches", "2")
+        self.register("2")
+        self.assertEqual(self.call("2", "--free-batches", "2")[0], 0)            # second batch also free
+        self.register("3")
+        code, err = self.call("3", "--free-batches", "2")
+        self.assertEqual(code, 2)
+        self.assertIn("batch 2 is not analysed yet", err)
+        self.assertIn("The first 2 batch(es) start without analysis (--free-batches)", err)
+
+    def test_a_batch_split_over_calls_needs_no_analysis_in_between(self):
+        self.register("1")
+        self.assertEqual(self.call("1", points=[{"x": 0.0}])[0], 0)
+        self.assertEqual(self.call("1", points=[{"x": 1.0}])[0], 0)
+
+    def test_off_by_default(self):
+        self.register("1")
+        self.call("1", flag=False)
+        self.register("2")
+        self.assertEqual(self.call("2", flag=False)[0], 0)
+        self.assertNotIn("analysed", self.last_witness())
+
+    def test_analysis_options_need_the_flag(self):
+        self.register("1")
+        self.assertEqual(self.call("1", "--free-batches", "2", flag=False)[0], 1)
+        self.assertEqual(self.call("1", "--free-batches", "x")[0], 1)
 
 
 class TestHook(Workspace):
@@ -623,7 +773,7 @@ class TestHook(Workspace):
         self.assertEqual(out.strip(), "PASS")
         self.assertEqual(len(wit), 1)
         w = wit[0]
-        self.assertEqual((w["verdict"], w["violations"], w["gate"], w["version"]), ("PASS", [], "result_gate", "0.4.2"))
+        self.assertEqual((w["verdict"], w["violations"], w["gate"], w["version"]), ("PASS", [], "result_gate", "0.4.3"))
         self.assertEqual(w["submission_sha256"], sha(SUBMISSION))
         self.assertEqual((w["comparison"], w["selected"], w["budget_left"]), ("cpt-t-comparison-c2", A, 3))
         self.assertEqual(w["source_sha256"], hashlib.sha256((self.td / "acquisitions.jsonl").read_bytes()).hexdigest())

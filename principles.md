@@ -61,7 +61,9 @@ P5. **New points are designed, not guessed.** Every proposed experiment is
     `{design_gate}`.
     RUN: Outputs end with the handoff (variance and boundary targets).
     COMPARISON: Open Pairs, and when nothing is selected the fail modes of
-    the non-dominated candidates, are the only `information →` targets.
+    the non-dominated candidates, are the only `information →` targets; each
+    batch is analysed before the next is designed (optionally enforced by
+    `{design_log} hook --require-analysis`).
 
 P6. **A hypothesis is the fewest free parameters that explain, plus where it holds; equal quality goes to the fewer parameters.** The starting candidate is the simplest one; every further hypothesis states how many free parameters it adds and the conditions under which it is claimed to apply. The PLAN
     declares what "equal quality" means before any RUN; among candidates within
@@ -105,8 +107,10 @@ P8. **Candidates are compared pairwise, the verdict is a vector, and a
     Vectors, Pairwise Dominance, Selection, Open Pairs; one per snapshot per
     phase; a final result is the selection of a COMPARISON of structurally
     different candidates on the final snapshot with no open pair left while
-    budget remains, or at budget 0 with nothing selected the best available
-    candidate, reported as not passing; checked by `{result_gate}`. RUN: reports only its own
+    budget remains, or with nothing selected the best available candidate,
+    reported as not passing (before budget 0 only with a reason why the
+    remaining budget cannot change the selection); checked by
+    `{result_gate}`. RUN: reports only its own
     vector and its Structure, and never ranks itself.
 
 P9. **Every criterion says how it is measured; cheap gates run first; the agent does not judge its own result.** A criterion is `mechanical` with its

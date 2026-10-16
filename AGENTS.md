@@ -34,9 +34,11 @@ ALWAYS run `python3 {result_gate} --plan architecture/PLAN.md --dataset architec
 
 NEVER stop with a result WHILE the latest COMPARISON has an `open` pair and budget remains; fewer experiments is never a reason
 
-NEVER stop WHILE the latest COMPARISON selects `none` and budget remains: name the fail mode of each non-dominated candidate (biased or imprecise, and where; per-unit breakdown of a pooled criterion), then run a batch justified `information → fail mode <RUN ID> <criterion>: <where>` or add a structurally different candidate
+NEVER stop WHILE the latest COMPARISON selects `none` and budget remains without one of two steps: (A) name the fail mode of each non-dominated candidate (biased or imprecise, and where; per-unit breakdown of a pooled criterion), then design one batch justified `information → fail mode <RUN ID> <criterion>: <where>` or add a structurally different candidate; or (B) hand in the `**Best available**:` candidate with its `**Fails**:` and `**Not separable because**: <why no batch within the remaining budget would change the selection>`
 
-ALWAYS, at budget 0 with nothing selected, submit the `**Best available**:` candidate with its `**Fails**:` after `{result_gate}` PASS with `--budget-left 0`, and NEVER present it as passing the PLAN's criteria
+ALWAYS analyse each batch (RUN, and from the second batch a COMPARISON, on the snapshot that includes it) before calling the next one; spending the budget is never a route to a result
+
+NEVER present a best available result as passing the PLAN's criteria; at budget 0 the `**Not separable because**:` line is optional
 
 NEVER loosen a criterion after seeing which candidate it favours; a criterion changes only in a new PLAN with a reason stated in terms of the measurement
 

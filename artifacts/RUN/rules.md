@@ -59,7 +59,11 @@
     others. The next batch's justification must point at one of these, at an
     open pair of the COMPARISON, or, when the COMPARISON selects nothing, at a
     fail mode of a non-dominated candidate (COMPARISON rule 10); a batch that
-    none of them motivated is unjustified by definition.
+    none of them motivated is unjustified by definition. A batch is run to be
+    analysed: the RUN on the snapshot that includes it is written before the
+    next batch. `{design_log} hook --require-analysis` enforces this before
+    every call and `{result_gate} --require-analysis` (R7) checks it at the
+    end.
 11. **Snapshot, structure and candidate file are fields the result gate
     reads.** Section 1 carries `**Dataset**:` (the DATASET ID) and
     `**Experiments**:` (every experiment of the snapshot by name, `e1–e12` for

@@ -51,11 +51,13 @@ status: draft
 
 **Selected**: {`cpt-{system}-run-{slug}`, or `none`}
 
-**Best available**: {only with `**Selected**: none` and the budget spent: `cpt-{system}-run-{slug}`, a non-dominated candidate with no `not evaluated` row; otherwise omit this line}
+**Best available**: {only with `**Selected**: none`: `cpt-{system}-run-{slug}`, a non-dominated candidate with no `not evaluated` row; otherwise omit this line}
 
 **Fails**: {with a best available candidate: every criterion it fails, as `` `cpt-{system}-criterion-{slug}` (biased: {units or regime}) `` or `(imprecise: {output})`, separated by `;`; otherwise omit this line}
 
-{Among non-dominated candidates: the difference on the agreed quality metric under the PLAN tie threshold (or information criterion, as declared), then fewer free parameters. Selected RUN ID and the line of the PLAN selection rule that decided it. If no candidate passes every mechanical gate, nothing is selected and this section says so. With budget left that is not a stopping point: name the fail modes of the non-dominated candidates and aim the next batch at them, or add a structurally different candidate (rule 10). Only when the budget is spent, name the best available candidate and what it fails (rule 11); it is reported as best available, never as passing the PLAN's criteria.}
+**Not separable because**: {with a best available candidate while budget remains: why no batch within the remaining budget would change the selection, in terms of the conditions and the noise, never of saving budget; optional at budget 0; otherwise omit this line}
+
+{Among non-dominated candidates: the difference on the agreed quality metric under the PLAN tie threshold (or information criterion, as declared), then fewer free parameters. Selected RUN ID and the line of the PLAN selection rule that decided it. If no candidate passes every mechanical gate, nothing is selected and this section says so. With budget left that is not a stopping point: either name the fail modes of the non-dominated candidates and design the next batch from them, or add a structurally different candidate (rule 10); or name the best available candidate, what it fails, and why no batch within the remaining budget would change that (rule 11). At budget 0 the reason is optional. A best available result is never presented as passing the PLAN's criteria.}
 
 ## 6. Open Pairs
 

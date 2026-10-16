@@ -6,7 +6,7 @@ manifest_version = "1.0"
 [[kits]]
 slug = "studio-kit-core"
 name = "studio-kit-core"
-version = "0.4.2"
+version = "0.4.3"
 
 # ── PLAN ────────────────────────────────────────────────────────
 [[kits.resources]]
@@ -171,7 +171,7 @@ source = "scripts/design_log.py"
 install_path = "scripts/design_log.py"
 type = "file"
 user_modifiable = false
-description = "Append-only design log for DATASET batches (append) and the pre-call hook that blocks unregistered experiments (hook)"
+description = "Append-only design log for DATASET batches (append) and the pre-call hook that blocks unregistered experiments and, with --require-analysis, unanalysed batches (hook)"
 
 [[kits.resources]]
 id = "design_gate"
@@ -190,7 +190,7 @@ source = "scripts/result_gate.py"
 install_path = "scripts/result_gate.py"
 type = "file"
 user_modifiable = false
-description = "Gate for a final result: rules R1-R6 (final snapshot, structural alternatives, copied vectors, submission = selection or best available at budget 0, stopping rule, structure) and the hook that writes a witness line and refuses"
+description = "Gate for a final result: rules R1-R6 (final snapshot, structural alternatives, copied vectors, submission = selection or best available, stopping rule, structure, optional sequential analysis R7) and the hook that writes a witness line and refuses"
 
 # ── constraints (keep LAST: the artifact bindings below attach to this resource)
 [[kits.resources]]

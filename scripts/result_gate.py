@@ -6,13 +6,14 @@ holds. Stdlib only.
     python3 scripts/result_gate.py --plan <PLAN.md> --dataset <DATASET.md>
             --runs <runs dir> --comparisons <comparisons dir> --submission <file>
             [--source <acquisitions> [--design-log <design_log.jsonl>]] [--budget-left N]
+            [--require-analysis]
     python3 scripts/result_gate.py hook --witness <result_witness.jsonl> <the same options>
 
 Gate mode prints one line per violation `[Rk] message`, `note:` lines, then
 PASS or FAIL - n violation(s). Exit 0 PASS, 1 FAIL, 2 usage error or an
 unreadable --source / --submission.
 
-Checks R1-R6 are those of the "Result gate" table in
+Checks R1-R7 are those of the "Result gate" table in
 artifacts/COMPARISON/rules.md:
 
   R1  the final COMPARISON (on the final snapshot, not superseded) exists:
@@ -30,16 +31,22 @@ artifacts/COMPARISON/rules.md:
   R4  section 5 `**Selected**:` names a listed RUN that passes every
       mechanical row, has no `not evaluated` row and is dominated by no
       candidate, and the sha256 of --submission equals that RUN's
-      `**Candidate sha256**:` (RUN section 3). Or, only with --budget-left 0:
-      `**Selected**: none` and `**Best available**:` names a listed RUN with
-      no `not evaluated` row, dominated by no candidate, failing at least one
-      mechanical row, every fail with its mode (biased / imprecise) in the
-      RUN's Verdict and its criterion ID in section 5 `**Fails**:`, and the
-      submission is that RUN's candidate file. `none` without a best
-      available, or a best available while budget remains or the budget is
-      unknown, is refused with the next step: name each non-dominated
-      candidate's fail modes, then run a batch aimed at a fail mode or add a
-      structurally different candidate.
+      `**Candidate sha256**:` (RUN section 3). Or `**Selected**: none` and
+      `**Best available**:` names a listed RUN with no `not evaluated` row,
+      dominated by no candidate, failing at least one mechanical row, every
+      fail with its mode (biased / imprecise) in the RUN's Verdict and its
+      criterion ID in section 5 `**Fails**:`, and the submission is that RUN's
+      candidate file; unless --budget-left is 0, section 5 also gives
+      `**Not separable because**: <reason>`, non-empty and not about saving
+      budget or using fewer experiments. A refusal for `none` names both ways
+      on: analyse the fail modes and design one batch on them (or add a
+      structurally different candidate), or hand in the best available
+      candidate with its reason.
+  R7  only with --require-analysis: every batch of the final snapshot except
+      the last is covered by a RUN on an intermediate snapshot, one that holds
+      every experiment of that batch and none of a later batch. Batches are
+      the source calls grouped by their design-log commitment (each call
+      without one is a batch), or DATASET section 6 rows without --source.
   R5  section 6 has a Status column with `open`, `closed by batch <id>`
       (a DATASET batch whose Justification has an `information →` target) or
       `unresolvable: <reason>`; every candidate the selected one does not
@@ -63,7 +70,7 @@ the agent's. It runs the same checks, appends one JSON line to --witness and
 exits 0 to accept, 2 to refuse (the report goes to stderr), 1 on a usage
 error (nothing is written). The witness line:
 
-  {"time": ISO 8601 UTC, "gate": "result_gate", "version": "0.4.2",
+  {"time": ISO 8601 UTC, "gate": "result_gate", "version": "0.4.3",
    "gate_sha256": sha256 of this script, "verdict": "PASS" | "FAIL" | "ERROR",
    "violations": ["[Rk] ...", ...], "notes": [...], "submission": path,
    "submission_sha256": hex | null, "comparison": ID | null,
@@ -102,7 +109,7 @@ sys.path.insert(0, str(HERE))
 from design_gate import SourceError, load_source  # noqa: E402
 from design_log import load_log, prefix_hash, same_point  # noqa: E402
 
-VERSION = "0.4.2"
+VERSION = "0.4.3"
 CONSTRAINTS = HERE.parent / "constraints.toml"
 SHA = re.compile(r"[0-9a-f]{64}")
 RESULTS = {"pass": "pass", "p": "pass", "fail": "fail", "f": "fail",
@@ -140,7 +147,7 @@ def sections(text: str) -> dict:
 
 def field(body: str, name: str):
     """Value of the first `**Name**: value` line in body (backticks kept), or None."""
-    m = re.search(rf"^\s*(?:[-*]\s+)?\*\*{re.escape(name)}\*\*\s*:\s*(.*?)\s*$", body, re.M | re.I)
+    m = re.search(rf"^[ \t]*(?:[-*][ \t]+)?\*\*{re.escape(name)}\*\*[ \t]*:[ \t]*(.*?)[ \t]*$", body, re.M | re.I)
     return m.group(1) if m else None
 
 
@@ -362,6 +369,7 @@ def load_comparison(path: Path, text: str) -> dict:
     best = field(sec.get("selection", ""), "Best available")
     comp["best"] = None if best is None else (ids_in(best, "run") or [plain(best).lower()])[0]
     comp["fails"] = field(sec.get("selection", ""), "Fails") or ""
+    comp["not_separable"] = field(sec.get("selection", ""), "Not separable because") or ""
     t6 = tables(sec.get("open pairs", ""))
     comp["pairs_head"] = [plain(h).lower() for h in t6[0][0]] if t6 else None
     comp["pairs"] = t6[0][1:] if t6 else []
@@ -430,7 +438,35 @@ def name_from_log(calls: list, log) -> None:
             p["name"] = p["name"] or q["name"]
 
 
-def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_left=None, design_log=None):
+def batches_of(calls, ds) -> list:
+    """[(label, [experiment names])] in acquisition order: source calls grouped by their design-log
+    commitment (a call without one is a batch), else DATASET section 6 rows."""
+    if calls is None:
+        return [(f"batch {r['batch']}", r["experiments"]) for r in (ds["rows"] if ds else [])]
+    out, last = [], object()
+    for c in calls:
+        key = c["lines"] if c["lines"] is not None else object()
+        if key != last or not out:
+            out.append([f"batch {len(out) + 1}", []])
+        out[-1][1] += [str(q["name"]).strip() for q in c["points"]]
+        last = key
+    return [tuple(b) for b in out]
+
+
+def check_analysis(batches, runs, bad) -> None:
+    """R7: every batch but the last is covered by a RUN holding all of it and nothing later."""
+    for i, (label, names) in enumerate(batches[:-1]):
+        later = {n for _, ns in batches[i + 1:] for n in ns}
+        if not any(r["experiments"] is not None and set(names) <= set(r["experiments"])
+                   and not (set(r["experiments"]) & later) for r in runs):
+            bad("R7", f"{label} ({', '.join(names[:5])}{', …' if len(names) > 5 else ''}) is not covered by a RUN "
+                      "on an intermediate snapshot (all of its experiments, none of a later batch): the batches after "
+                      "it ran without its analysis; a batch is designed from the latest RUN and COMPARISON "
+                      "(RUN rule 10)")
+
+
+def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_left=None, design_log=None,
+          require_analysis=False):
     """(violations, notes, info). Raises SourceError if --source or --submission
     cannot be read."""
     fails, notes = [], []
@@ -447,6 +483,7 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
     cons = load_constraints()
     crit = load_plan(plan, bad)
     ds = load_dataset(dataset, bad)
+    calls = None
     if source:
         calls = load_source(source)
         if design_log and any(not p["name"] for c in calls for p in c["points"]):
@@ -462,6 +499,8 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
     runs = load_dir(runs_dir, "RUN", cons.get("RUN", []), bad)
     comps = load_dir(comps_dir, "COMPARISON", cons.get("COMPARISON", []), bad)
     ds_id = ds["id"] if ds else None
+    if require_analysis:
+        check_analysis(batches_of(calls, ds), runs, bad)
 
     # R1 — the final COMPARISON
     where = f"--source {Path(source).name}" if source else "DATASET section 6"
@@ -595,14 +634,19 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
         named = "; ".join((f"{rid} fails " + ", ".join(f"{c} ({txt if m else 'mode not named'})" for c, m, txt in fails_of(rid)))
                           if fails_of(rid) else f"{rid} fails no row: select it"
                           for rid in undominated) or "no candidate has a Verdict"
-        return ("this is not a stopping point. Next: (1) in the RUN of each non-dominated candidate, name the mode of "
-                "every failing criterion, biased or imprecise, and where (which units, which regime); for a criterion "
-                f"pooled over units give the per-unit breakdown (RUN rules 8, 12). Now: {named}. (2) Run a batch "
-                "whose justification is `information → fail mode <RUN ID> <criterion>: <where>`, or add a RUN of a "
-                "structurally different candidate. (3) Write the new RUNs and a COMPARISON on the larger snapshot "
-                "(COMPARISON rule 10)")
+        return ("this is not a stopping point, and spending the budget is never a route to a result. Either (A) "
+                "analyse and probe: (1) in the RUN of each non-dominated candidate, name the mode of every failing "
+                "criterion, biased or imprecise, and where (which units, which regime); for a criterion pooled over "
+                f"units give the per-unit breakdown (RUN rules 8, 12). Now: {named}. (2) Design one batch from that "
+                "diagnosis, justified `information → fail mode <RUN ID> <criterion>: <where>`, or add a RUN of a "
+                "structurally different candidate. (3) Analyse it, new RUNs and a COMPARISON on the larger snapshot, "
+                "before the next batch (COMPARISON rule 10). Or (B) hand in the best available candidate now: "
+                "`**Best available**: <RUN ID>`, `**Fails**:` with each failing criterion and its mode, and "
+                "`**Not separable because**: <why no batch within the remaining budget would change the selection>` "
+                "(COMPARISON rule 11); saving budget or using fewer experiments is not a reason")
 
     target = None
+    reason = comp["not_separable"].strip()
     if sel is None:
         bad("R4", f"{cn}: section 5 has no `**Selected**: `<RUN ID>`` line (or `**Selected**: none`)")
     elif sel.startswith("cpt-"):
@@ -628,9 +672,8 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
                         bad("R4", f"selected {sel} is dominated by {o} (COMPARISON rule 3)")
     elif best is None or not best.startswith("cpt-"):
         if budget_left is None:
-            bad("R4", f"{cn}: nothing is selected and the remaining budget is unknown; pass --budget-left (0 when "
-                      f"the budget is spent). While budget remains, {step()}. At budget 0, name the result as "
-                      "`**Best available**: <RUN ID>` with its `**Fails**:` (COMPARISON rule 11)")
+            bad("R4", f"{cn}: nothing is selected and the remaining budget is unknown (pass --budget-left, 0 when "
+                      f"the budget is spent); {step()}. At budget 0 the `**Not separable because**:` line is optional")
         elif budget_left > 0:
             bad("R4", f"{cn}: nothing is selected and {budget_left} batch(es) remain; {step()}")
         else:
@@ -639,12 +682,15 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
                       "with its mode, in `**Fails**:` (COMPARISON rule 11). Non-dominated: "
                       f"{', '.join(undominated) or 'none'}")
     else:
-        if budget_left is None:
-            bad("R4", f"{cn}: best available {best} is accepted only at budget 0 and the remaining budget is "
-                      "unknown; pass --budget-left")
-        elif budget_left > 0:
-            bad("R4", f"{cn}: best available {best} is offered with {budget_left} batch(es) left; a best available "
-                      f"result is accepted only at budget 0; {step()}")
+        reason_ok = budget_left == 0 or (bool(reason) and not NOT_A_REASON.search(reason))
+        if budget_left != 0:
+            left = "the remaining budget is unknown" if budget_left is None else f"{budget_left} batch(es) remain"
+            if not reason:
+                bad("R4", f"{cn}: best available {best} is offered while {left}, without a "
+                          f"`**Not separable because**:` reason; {step()}")
+            elif NOT_A_REASON.search(reason):
+                bad("R4", f"{cn}: best available {best}: `{reason}` is not a reason why the remaining budget cannot "
+                          f"change the selection; {step()}")
         if best not in comp["candidates"]:
             bad("R4", f"{cn}: best available {best} is not a candidate of section 2")
         else:
@@ -668,10 +714,10 @@ def check(plan, dataset, runs_dir, comps_dir, submission, source=None, budget_le
                     if c not in ids_in(comp["fails"], "criterion"):
                         bad("R4", f"{cn}: section 5 `**Fails**:` does not list {c}, which best available {best} "
                                   "fails; a best available result lists every criterion it fails with its mode")
-                if budget_left == 0:
+                if reason_ok:
                     notes.append(f"note: the result is the best available candidate {best}, not a selection: it "
                                  f"fails {', '.join(c for c, _, _ in fails_of(best))} and is never presented as "
-                                 "passing the PLAN's criteria")
+                                 "passing the PLAN's criteria" + (f"; not separable because: {reason}" if reason else ""))
     if target is not None:
         r = by_id.get(target)
         what = "selected" if info["selection"] == "selected" else "best available"
@@ -756,6 +802,9 @@ NEED = ("--plan", "--dataset", "--runs", "--comparisons", "--submission")
 
 def parse(argv, allowed):
     o, i = {}, 0
+    if "--require-analysis" in argv:
+        o["--require-analysis"] = True
+        argv = [a for a in argv if a != "--require-analysis"]
     while i < len(argv):
         a = argv[i]
         if a not in allowed or i + 1 >= len(argv) or a in o:
@@ -775,7 +824,8 @@ def parse(argv, allowed):
 
 def run_check(o):
     return check(o["--plan"], o["--dataset"], o["--runs"], o["--comparisons"], o["--submission"],
-                 o.get("--source"), o.get("--budget-left"), o.get("--design-log"))
+                 o.get("--source"), o.get("--budget-left"), o.get("--design-log"),
+                 bool(o.get("--require-analysis")))
 
 
 def hook(o) -> int:

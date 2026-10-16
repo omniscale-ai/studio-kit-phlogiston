@@ -161,7 +161,18 @@ blocked. As a Claude Code `PreToolUse` hook in `.claude/settings.json`:
 ```
 
 For an experiment CLI, the wrapper runs `{design_log} hook … --points <json>
---tool <name>` and aborts the call on a non-zero exit. The design tools
+--tool <name>` and aborts the call on a non-zero exit.
+
+**Sequential analysis (optional).** With `--require-analysis` the hook also
+refuses a call that starts a new batch until the previous batch is analysed:
+a RUN in `--runs` whose `**Experiments**:` include every experiment of that
+batch and, when it is the second batch or later, a COMPARISON in
+`--comparisons` that includes them too (defaults: `runs/` and `comparisons/`
+next to the log). The first `--free-batches N` batches (default 1) start
+without it. The refusal names the batch and what to write; the admitted
+call's witness record carries `analysed` with the covering IDs. It is the
+mechanical form of RUN rule 10 and COMPARISON rule 5: a batch is designed from
+the latest RUN and COMPARISON, never fired off to spend the budget. The design tools
 (`propose_doe_experiments`, `fit_parameters`) are not gated: they run no
 experiment.
 

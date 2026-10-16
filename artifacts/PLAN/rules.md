@@ -35,8 +35,11 @@
    PLAN lists both, and a phase that reaches its limit analyses what it has
    instead of calling again. Unspent budget is not a saving: the run stops
    with a result only when the final COMPARISON has no `open` pair, selects
-   a candidate, or the budget is spent, and only after `{result_gate}` PASS
-   (COMPARISON rules 8-11). A failing criterion is not a stop condition.
+   a candidate, hands in the best available one with a reason why the
+   remaining budget cannot change the selection, or the budget is spent, and
+   only after `{result_gate}` PASS (COMPARISON rules 8-11). A failing
+   criterion is not a stop condition, and spending the budget is not a route
+   to a result: every batch is analysed before the next one is designed.
 8. **The phase sequence is the skeleton.** PRE-1, then per cycle Model
    Refinement and Design of Experiments with Mechanism Discrimination inserted
    after the first cycle, then Final Model Formulation and Report. Gates and

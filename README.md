@@ -18,12 +18,12 @@ workflows/literature.md           literature workflow       (intake, four strate
 scripts/lit_run.py                literature retrieval      (OpenAlex REST, stdlib only; writes the draft LITERATURE)
 scripts/lit_gate.py               LITERATURE gate           (L1–L11; --resolve for DOIs; --resolve and --plan for verified)
 scripts/lit_common.py             shared literature code    (parsing and exclusion matching used by lit_run and lit_gate)
-scripts/design_log.py             design pre-registration   (append-only log of batches; PreToolUse hook that blocks unregistered calls)
+scripts/design_log.py             design pre-registration   (append-only log of batches; PreToolUse hook that blocks unregistered calls and, optionally, unanalysed batches)
 scripts/design_gate.py            DATASET design gate       (D1–D5: log integrity, registered before run, conditions, section 6 copy)
-scripts/result_gate.py            final-result gate         (R1–R6: final snapshot, structural alternatives, copied vectors, submission = selection or best available at budget 0, stopping rule, structure; hook with witness)
+scripts/result_gate.py            final-result gate         (R1–R6: final snapshot, structural alternatives, copied vectors, submission = selection or best available, stopping rule, structure, optional R7 sequential analysis; hook with witness)
 tests/test_literature.py          literature tests          (gate and retrieval: the shipped example, planted errors, blind exclusions, offline stubs)
 tests/test_design.py              design gate tests         (honest run, retroactive log, mismatched points, rewritten log, hook)
-tests/test_result.py              result gate tests         (PASS, one FAIL per check R1–R6, stopping rule with and without budget, nothing selected / best available, hook witness)
+tests/test_result.py              result gate tests         (PASS, one FAIL per check R1–R6, stopping rule with and without budget, nothing selected / best available with and without reason, sequential analysis, hook witness)
 tests/fixtures/                   test fixtures             (PLANs in modes allowed, blind, none; design/: log, oracle, DATASET)
 principles.md                     12 cross-cutting invariants, loaded first by every rules.md
 AGENTS.md                         agent quick reference, public rule: lands in the project's generated AGENTS.md
