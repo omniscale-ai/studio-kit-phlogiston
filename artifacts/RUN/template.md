@@ -15,13 +15,23 @@ status: draft
 
 ## 1. Unit
 
-{DATASET ID(s) and the snapshot: which experiments (names, count, total data points = points per experiment × count) and their origin composition ({n} ground-truth, {m} simulated). The COMPARISON this RUN is a candidate in, once it exists: `cpt-{system}-comparison-{slug}`. A RUN on simulated data tests the candidate and the design; a RUN on ground truth tests the system; say which this is. A RUN uses every experiment acquired so far; anything excluded is listed in Deviations with a reason that does not mention the outcome.}
+**Dataset**: `cpt-{system}-dataset-{slug}`
+
+**Experiments**: {every experiment of the snapshot by name, comma-separated, `e1–e12` for a numeric range; the same list as the COMPARISON this RUN is a candidate in}
+
+{The snapshot: which experiments (names, count, total data points = points per experiment × count) and their origin composition ({n} ground-truth, {m} simulated). The COMPARISON this RUN is a candidate in, once it exists: `cpt-{system}-comparison-{slug}`. A RUN on simulated data tests the candidate and the design; a RUN on ground truth tests the system; say which this is. A RUN uses every experiment acquired so far; anything excluded is listed in Deviations with a reason that does not mention the outcome.}
 
 ## 2. Procedure
 
 {The procedure and the tool that executes it (fit tool, test, optimiser, classifier, …), its MCP server and contract version. Phase and cycle in which it ran (e.g. POST-1, or CYCLE-1 of cycle 2). Which call of that phase this was, out of the phase limit for that tool.}
 
 ## 3. Candidate Spec
+
+**Structure**: {the candidate's structural family: functional form, mechanism or model class, independent of parameter values, ranges, initial values and settings}
+
+**Candidate file**: `{path of the file this candidate would be submitted as}`
+
+**Candidate sha256**: `{sha256 of that file's bytes, 64 hex digits}`
 
 {What the procedure was applied with, exactly as the tool consumes it: for a fit, the model spec (states, parameters with finite ranges, initial state, algebraics, right-hand sides, observables); for a test, the hypotheses and the statistic; for an optimisation, objective and constraints. Then the governing equations or decision rule in mathematical form with every symbol named and its unit. Then: number of free parameters {k}; the nested simpler candidate this one extends (RUN id, {k−n} free parameters) or `starting candidate`; the applicability claimed (condition ranges or regime), compared with the explored ranges in the DATASET axes table.}
 

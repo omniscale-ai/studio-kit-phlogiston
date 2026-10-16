@@ -8,9 +8,9 @@ artifacts/PLAN/rules.md           rules for the agent       (your 5 + 5 agent-sp
 artifacts/DATASET/template.md     DATASET structure         (agent + simulator, MEASUREMENT/SYNTHESIS axes)
 artifacts/DATASET/rules.md        rules for the agent       (your 6 + 6 agent-specific + principles map)
 artifacts/RUN/template.md         RUN structure             (one procedure on one data snapshot: fit, test, optimisation, …)
-artifacts/RUN/rules.md            rules for the agent       (10 rules + principles map)
+artifacts/RUN/rules.md            rules for the agent       (11 rules + principles map)
 artifacts/COMPARISON/template.md  COMPARISON structure      (candidates on one snapshot: vectors, dominance, selection, open pairs)
-artifacts/COMPARISON/rules.md     rules for the agent       (7 rules + principles map)
+artifacts/COMPARISON/rules.md     rules for the agent       (9 rules + result gate table + principles map)
 artifacts/LITERATURE/template.md  LITERATURE structure      (one literature request along one of four strategies)
 artifacts/LITERATURE/rules.md     rules for the agent       (12 rules + gate table + principles map)
 artifacts/LITERATURE/examples/    worked example            (Path 1, related work, gate PASS online with --plan)
@@ -20,8 +20,10 @@ scripts/lit_gate.py               LITERATURE gate           (L1–L11; --resolve
 scripts/lit_common.py             shared literature code    (parsing and exclusion matching used by lit_run and lit_gate)
 scripts/design_log.py             design pre-registration   (append-only log of batches; PreToolUse hook that blocks unregistered calls)
 scripts/design_gate.py            DATASET design gate       (D1–D5: log integrity, registered before run, conditions, section 6 copy)
+scripts/result_gate.py            final-result gate         (R1–R6: final snapshot, structural alternatives, copied vectors, submission = selection, stopping rule, structure; hook with witness)
 tests/test_literature.py          literature tests          (gate and retrieval: the shipped example, planted errors, blind exclusions, offline stubs)
 tests/test_design.py              design gate tests         (honest run, retroactive log, mismatched points, rewritten log, hook)
+tests/test_result.py              result gate tests         (PASS, one FAIL per check R1–R6, stopping rule with and without budget, hook witness)
 tests/fixtures/                   test fixtures             (PLANs in modes allowed, blind, none; design/: log, oracle, DATASET)
 principles.md                     12 cross-cutting invariants, loaded first by every rules.md
 AGENTS.md                         agent quick reference, public rule: lands in the project's generated AGENTS.md

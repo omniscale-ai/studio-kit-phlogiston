@@ -208,7 +208,7 @@ Frozen at: {date, before phase 1}. Confirmed by: {person}.
 
 ## 10. Stop Conditions
 
-{When the run stops early: simulate or real budget exhausted; every checklist row TESTED and the best RUN on ground truth passes all criteria; the user stops the run; a tool failure fails the phase rather than being retried silently; actual simulation time exceeds the confirmed cost by {factor}; the human changes the metric, which closes this PLAN and opens a new one.}
+{When the run stops early: simulate or real budget exhausted; every checklist row TESTED and the best RUN on ground truth passes all criteria; the user stops the run; a tool failure fails the phase rather than being retried silently; actual simulation time exceeds the confirmed cost by {factor}; the human changes the metric, which closes this PLAN and opens a new one. Budget left over is not a reason to stop early, and fewer experiments is never one: while the latest COMPARISON has an `open` pair and budget remains, the run continues with the batch that separates it. A final result is presented only after `{result_gate}` PASS (COMPARISON rules 8, 9).}
 
 ## 11. Approval
 

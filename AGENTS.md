@@ -28,6 +28,12 @@ ALWAYS append the batch to `architecture/design_log.jsonl` with `python3 {design
 
 ALWAYS copy section 6 Justification and Design method of a DATASET from the design log, and run `python3 {design_gate} architecture/design_log.jsonl --source <acquisitions> --dataset <DATASET>` next to `cfs validate` before presenting it
 
+ALWAYS write a RUN per candidate and a COMPARISON per snapshot, with the RUN fields `**Dataset**`, `**Experiments**`, `**Structure**`, `**Candidate file**`, `**Candidate sha256**` and the COMPARISON fields `**Dataset**`, `**Experiments**`, `**Selected**` and the section 6 Status column
+
+ALWAYS run `python3 {result_gate} --plan architecture/PLAN.md --dataset architecture/DATASET.md --runs architecture/runs --comparisons architecture/comparisons --submission <file> --budget-left <batches left> [--source <acquisitions>]` before presenting a final result, and NEVER present a result it refuses
+
+NEVER stop with a result WHILE the latest COMPARISON has an `open` pair and budget remains; fewer experiments is never a reason
+
 ALWAYS follow `{literature_workflow}` WHEN literature is to be searched, cited or put into a PLAN
 
 NEVER search literature WHEN there is no PLAN, its Literature mode is `none`, or the mode is not yet confirmed by the human

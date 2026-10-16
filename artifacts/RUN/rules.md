@@ -3,6 +3,7 @@
 **Dependencies**:
 - `{principles}` — cross-cutting invariants P1–P12; load before these rules
 - `{run_template}` — structural reference
+- `{result_gate}` — gate for a final result; reads the fields of rule 11 (COMPARISON rules, "Result gate")
 
 ---
 
@@ -56,13 +57,26 @@
     others. The next batch's justification must point at one of these or at an
     open pair of the COMPARISON; a batch that none of them motivated is
     unjustified by definition.
+11. **Snapshot, structure and candidate file are fields the result gate
+    reads.** Section 1 carries `**Dataset**:` (the DATASET ID) and
+    `**Experiments**:` (every experiment of the snapshot by name, `e1–e12` for
+    a numeric range), identical to those of the COMPARISON the RUN is a
+    candidate in. Section 3 carries `**Structure**:`, the candidate's
+    structural family: the functional form, mechanism or model class,
+    independent of parameter values, ranges, initial values and settings. Two
+    RUNs that differ only in those share a Structure; a candidate that adds,
+    removes or replaces a term has its own. Section 3 also carries
+    `**Candidate file**:` and `**Candidate sha256**:`, the file this candidate
+    would be submitted as and the sha256 of its bytes; when the file changes,
+    the RUN is redone or the hash updated with a Deviation saying why. The
+    submitted file is byte-identical to the selected RUN's candidate file.
 
 ## Where the principles land in a RUN
 
 | Section | Principles |
 |---------|------------|
 | 1. Unit | P1 origin counts; a simulated-data RUN is not a result about the real system |
-| 3. Candidate Spec | P6 free-parameter count, nested simpler candidate, claimed applicability vs explored range |
+| 3. Candidate Spec | P8 Structure, so that alternatives are structurally different; P6 free-parameter count, nested simpler candidate, claimed applicability vs explored range |
 | 5. Assumptions | P2 first row cites the concordance; P10 ranges or priors verified or assumed |
 | 7. Outputs | P6 parsimony check; P11 supported / falsified by hypothesis ID in the handoff (P8 pairwise standing lives in the COMPARISON) |
 | 8. Deviations | P7 doubts about a criterion with a proposal for a new PLAN; P12 rejection feedback verbatim |

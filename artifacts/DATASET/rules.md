@@ -111,6 +111,11 @@ time.
    format, or the witness file the hook below writes. When the witness exists,
    run the gate on it with `--require-commit`.
 
+The Experiments column of section 6 names every experiment of the batch
+(comma-separated, `e1–e12` for a numeric range), with the names used in the
+call; RUN and COMPARISON snapshots list the same names, and `{result_gate}`
+reads the column when it has no `--source`.
+
 Run before presenting the DATASET, next to `cfs validate`:
 
 `python3 {design_gate} architecture/design_log.jsonl --source <acquisitions> --dataset architecture/DATASET.md [--require-commit]`

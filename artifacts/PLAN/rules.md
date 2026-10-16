@@ -3,6 +3,7 @@
 **Dependencies**:
 - `{principles}` — cross-cutting invariants P1–P12; load before these rules
 - `{plan_template}` — structural reference
+- `{result_gate}` — gate for a final result; enforces the stopping rule of rule 7
 
 ---
 
@@ -32,7 +33,10 @@
    number of experiments set by the apparatus; the total is shared across all
    phases and each phase type has its own hard call limit for every tool. The
    PLAN lists both, and a phase that reaches its limit analyses what it has
-   instead of calling again.
+   instead of calling again. Unspent budget is not a saving: the run stops
+   with a result only when the final COMPARISON has no `open` pair or the
+   budget is spent, and only after `{result_gate}` PASS (COMPARISON rules 8,
+   9).
 8. **The phase sequence is the skeleton.** PRE-1, then per cycle Model
    Refinement and Design of Experiments with Mechanism Discrimination inserted
    after the first cycle, then Final Model Formulation and Report. Gates and

@@ -15,7 +15,13 @@ status: draft
 
 ## 1. Snapshot
 
-{DATASET ID, the experiments included (names, count, data points) and their origin composition. Every candidate below was run on exactly this snapshot; a RUN on a different snapshot is not comparable and is not listed. PLAN ID whose criteria and selection rule apply.}
+**Dataset**: `cpt-{system}-dataset-{slug}`
+
+**Experiments**: {every experiment of the snapshot by name, comma-separated, `e1–e12` for a numeric range; the final COMPARISON lists every experiment acquired}
+
+**Supersedes**: {`cpt-{system}-comparison-{slug}` of an earlier COMPARISON on this same snapshot that this one replaces, or `none`}
+
+{The experiments included (count, data points) and their origin composition. Every candidate below was run on exactly this snapshot; a RUN on a different snapshot is not comparable and is not listed. PLAN ID whose criteria and selection rule apply.}
 
 ## 2. Candidates
 
@@ -43,15 +49,17 @@ status: draft
 
 ## 5. Selection
 
+**Selected**: {`cpt-{system}-run-{slug}`, or `none`}
+
 {Among non-dominated candidates: the difference on the agreed quality metric under the PLAN tie threshold (or information criterion, as declared), then fewer free parameters. Selected RUN ID and the line of the PLAN selection rule that decided it. If no candidate passes every mechanical gate, nothing is selected and this section says so.}
 
 ## 6. Open Pairs
 
-{Non-dominated pairs this snapshot cannot separate. For each: the hypotheses (IDs) that differ between them and the condition under which they predict different observables. These are the only legitimate `information →` targets for the next batch.}
+{Non-dominated pairs this snapshot cannot separate. For each: the hypotheses (IDs) that differ between them and the condition under which they predict different observables. These are the only legitimate `information →` targets for the next batch. Status is `open` until a batch whose `information →` justification names the pair is in the snapshot (`closed by batch {id}`), or `unresolvable: {why the remaining budget cannot separate it}`. Fewer experiments, saving budget or efficiency is never a reason. A final result is presented only when no pair is `open` or the budget is spent, and only after `{result_gate}` PASS. Every candidate the selected one does not dominate is in a pair with it. Write `None` if there is no open pair.}
 
-| Pair | Differing hypotheses (IDs) | Condition that separates them |
-|------|----------------------------|-------------------------------|
-| {RUN} vs {RUN} | {…} | {…} |
+| Pair | Differing hypotheses (IDs) | Condition that separates them | Status |
+|------|----------------------------|-------------------------------|--------|
+| `cpt-{system}-run-{slug}` vs `cpt-{system}-run-{slug}` | {…} | {…} | open / closed by batch {id} / unresolvable: {reason} |
 
 ## 7. Hypothesis Status Updates
 

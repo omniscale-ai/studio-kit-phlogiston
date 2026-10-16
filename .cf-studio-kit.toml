@@ -6,7 +6,7 @@ manifest_version = "1.0"
 [[kits]]
 slug = "studio-kit-core"
 name = "studio-kit-core"
-version = "0.3.0"
+version = "0.4.0"
 
 # ── PLAN ────────────────────────────────────────────────────────
 [[kits.resources]]
@@ -181,6 +181,16 @@ install_path = "scripts/design_gate.py"
 type = "file"
 user_modifiable = false
 description = "Gate for P5 pre-registration: rules D1-D5 against a non-agent acquisitions source and DATASET section 6"
+
+# ── result gate (stdlib Python; P8, COMPARISON rules 8-9)
+[[kits.resources]]
+id = "result_gate"
+kind = "script"
+source = "scripts/result_gate.py"
+install_path = "scripts/result_gate.py"
+type = "file"
+user_modifiable = false
+description = "Gate for a final result: rules R1-R6 (final snapshot, structural alternatives, copied vectors, submission = selection, stopping rule, structure) and the hook that writes a witness line and refuses"
 
 # ── constraints (keep LAST: the artifact bindings below attach to this resource)
 [[kits.resources]]

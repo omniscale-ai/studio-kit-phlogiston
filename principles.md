@@ -100,7 +100,10 @@ P8. **Candidates are compared pairwise, the verdict is a vector, and a
     discriminating batch is the antipattern this principle exists to stop.
     PLAN: selection rule declared in Hypothesis Space. COMPARISON: Criterion
     Vectors, Pairwise Dominance, Selection, Open Pairs; one per snapshot per
-    phase. RUN: reports only its own vector and never ranks itself.
+    phase; a final result is the selection of a COMPARISON of structurally
+    different candidates on the final snapshot with no open pair left while
+    budget remains, checked by `{result_gate}`. RUN: reports only its own
+    vector and its Structure, and never ranks itself.
 
 P9. **Every criterion says how it is measured; cheap gates run first; the agent does not judge its own result.** A criterion is `mechanical` with its
     formula or test, or `judged by` a named human, or a judge with a
